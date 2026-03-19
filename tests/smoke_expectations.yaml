@@ -1,0 +1,169 @@
+cross_one_way_anova:
+  data_type: cross
+  between_factors: [group]
+  factor2_col: null
+  control_group: G1
+  expected_analysis_status: ready
+  expected_recommended_method: one_way_anova
+  expected_recommended_engine: pingouin
+  expected_used_method: one_way_anova
+  omnibus_should_exist: true
+  expected_omnibus_terms: [group]
+  posthoc_should_exist: true
+  star_map_min_count: 1
+  expected_omnibus_effect_metric: omega_squared
+  expected_pairwise_effect_metric: hedges_g
+
+cross_welch_anova:
+  data_type: cross
+  between_factors: [group]
+  factor2_col: null
+  control_group: G1
+  expected_analysis_status: ready
+  expected_recommended_method: welch_anova
+  expected_recommended_engine: pingouin
+  expected_used_method: welch_anova
+  omnibus_should_exist: true
+  expected_omnibus_terms: [group]
+  posthoc_should_exist: true
+  star_map_min_count: 1
+  expected_omnibus_effect_metric: omega_squared
+  expected_pairwise_effect_metric: hedges_g
+  expected_warning_contains:
+    - Omega-squared is not reported for Welch ANOVA
+
+cross_kruskal:
+  data_type: cross
+  between_factors: [group]
+  factor2_col: null
+  control_group: null
+  expected_analysis_status: ready
+  expected_recommended_method: kruskal
+  expected_recommended_engine: scipy
+  expected_used_method: kruskal
+  omnibus_should_exist: true
+  expected_omnibus_terms: [group]
+  posthoc_should_exist: true
+  star_map_min_count: 1
+  expected_omnibus_effect_metric: epsilon_squared
+  expected_pairwise_effect_metric: rank_biserial
+
+longitudinal_rm_anova:
+  data_type: longitudinal
+  between_factors: [group]
+  factor2_col: null
+  control_group: null
+  expected_analysis_status: ready
+  expected_recommended_method: rm_anova
+  expected_recommended_engine: pingouin
+  expected_used_method: rm_anova
+  omnibus_should_exist: true
+  expected_omnibus_terms: [time]
+  posthoc_should_exist: true
+  star_map_min_count: 1
+  expected_omnibus_effect_metric: partial_eta_squared
+  expected_pairwise_effect_metric: hedges_g
+
+longitudinal_friedman:
+  data_type: longitudinal
+  between_factors: [group]
+  factor2_col: null
+  control_group: null
+  expected_analysis_status: ready
+  expected_recommended_method: friedman
+  expected_recommended_engine: pingouin
+  expected_used_method: friedman
+  omnibus_should_exist: true
+  expected_omnibus_terms: [time]
+  posthoc_should_exist: true
+  star_map_min_count: 1
+  expected_omnibus_effect_metric: kendalls_w
+  expected_pairwise_effect_metric: rank_biserial
+
+longitudinal_mixed_anova:
+  data_type: longitudinal
+  between_factors: [group]
+  factor2_col: null
+  control_group: Control
+  expected_analysis_status: ready
+  expected_recommended_method: mixed_anova
+  expected_recommended_engine: pingouin
+  expected_used_method: mixed_anova
+  omnibus_should_exist: true
+  expected_omnibus_terms: [Group, Time, Interaction]
+  posthoc_should_exist: true
+  star_map_min_count: 1
+  expected_omnibus_effect_metric: partial_eta_squared
+  expected_pairwise_effect_metric: hedges_g
+
+longitudinal_mixedlm:
+  data_type: longitudinal
+  between_factors: [group, sex]
+  factor2_col: sex
+  control_group: Control
+  expected_analysis_status: ready
+  expected_recommended_method: mixedlm
+  expected_recommended_engine: statsmodels
+  expected_used_formula_contains:
+    - C(time)
+    - C(group)
+    - C(sex)
+  omnibus_should_exist: false
+  fixed_effects_should_exist: true
+  contrast_table_should_exist: true
+  star_map_min_count: 1
+  expected_effect_metric: beta_se_ci
+  expected_fallback_reason_contains:
+    - Pingouin mixed_anova() supports only one between-subject factor
+
+blocked_missing_subject:
+  data_type: longitudinal
+  between_factors: [group]
+  factor2_col: null
+  control_group: null
+  expected_analysis_status: blocked
+  omnibus_should_exist: false
+  posthoc_should_exist: false
+  star_map_min_count: 0
+  expected_blocking_reason_contains:
+    - subject column
+
+blocked_one_time_level:
+  data_type: longitudinal
+  between_factors: [group]
+  factor2_col: null
+  control_group: null
+  expected_analysis_status: blocked
+  omnibus_should_exist: false
+  posthoc_should_exist: false
+  star_map_min_count: 0
+  expected_blocking_reason_contains:
+    - at least two time levels
+
+blocked_single_group_cross:
+  data_type: cross
+  between_factors: [group]
+  factor2_col: null
+  control_group: null
+  expected_analysis_status: blocked
+  omnibus_should_exist: false
+  posthoc_should_exist: false
+  star_map_min_count: 0
+  expected_blocking_reason_contains:
+    - at least two groups
+
+blocked_unbalanced_repeated:
+  data_type: longitudinal
+  between_factors: [group]
+  factor2_col: null
+  control_group: Control
+  expected_recommended_method: mixedlm
+  expected_recommended_engine: statsmodels
+  expected_analysis_status_any_of: [ready, blocked]
+  omnibus_should_exist: false
+  expected_fallback_reason_contains:
+    - missing or unbalanced repeated
+  notes: >
+    This dataset is primarily for selector fallback validation.
+    The important assertion is that unbalanced repeated cells route to MixedLM.
+    Final model fit may be unstable depending on optimizer behavior and should not be treated as the main pass/fail criterion.
