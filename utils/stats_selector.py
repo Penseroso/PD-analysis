@@ -17,45 +17,60 @@ def select_method(
     unequal_variance = not levene.get("equal_variance", True) if levene else False
     repeated_missing = balance_info.get("has_missing_repeated_cells", False)
     is_balanced = balance_info.get("is_balanced", True)
+    n_groups = len(n_per_group) if n_per_group else 0
 
     if data_type == "cross":
         if any_non_normal:
             recommended_method = "kruskal"
             recommended_engine = "scipy"
-            rationale.append("At least one group failed normality screening.")
+            rationale.append("At least one group failed normality screening, so a rank-based omnibus test is preferred.")
         elif unequal_variance:
             recommended_method = "welch_anova"
             recommended_engine = "pingouin"
-            rationale.append("Variance heterogeneity favors Welch ANOVA.")
+            rationale.append("Levene's test suggests unequal variances, so Welch ANOVA is preferred.")
         else:
             recommended_method = "one_way_anova"
             recommended_engine = "pingouin"
-            rationale.append("Distribution and variance checks support a parametric one-way comparison.")
+            rationale.append("Normality and equal-variance checks support a standard One-way ANOVA.")
     else:
         if len(between_factors) >= 2:
             recommended_method = "mixedlm"
             recommended_engine = "statsmodels"
-            fallback_reason = "Pingouin mixed_anova supports only one between-subject factor. Multiple between factors require MixedLM."
-            rationale.append("Repeated-measures design with two between factors is routed to MixedLM.")
+            fallback_reason = (
+                "Pingouin mixed_anova() supports only one between-subject factor. "
+                "Designs such as group + factor2 + time must use MixedLM."
+            )
+            rationale.append("Two or more between-subject factors require the MixedLM engine.")
         elif repeated_missing or not is_balanced:
             recommended_method = "mixedlm"
             recommended_engine = "statsmodels"
-            fallback_reason = "Missing or unbalanced repeated measures make ANOVA listwise deletion undesirable."
-            rationale.append("Repeated structure is incomplete or unbalanced.")
-        elif any_non_normal:
-            recommended_method = "mixed_anova"
+            fallback_reason = (
+                "Repeated cells are missing or unbalanced. MixedLM is preferred because RM-ANOVA and Mixed ANOVA would rely on listwise deletion or balanced-data assumptions."
+            )
+            rationale.append("The repeated-measures structure is incomplete or unbalanced.")
+        elif n_groups <= 1:
+            recommended_method = "friedman" if any_non_normal else "rm_anova"
             recommended_engine = "pingouin"
-            rationale.append("Normality issues were detected; nonparametric fallback guidance should be shown to the user.")
+            rationale.append("This is a single-group repeated-time design.")
+            if any_non_normal:
+                fallback_reason = "Friedman is preferred because at least one time cell failed normality screening."
+            elif sphericity and sphericity.get("applies"):
+                rationale.append("Sphericity will be checked and Greenhouse-Geisser correction metadata will be returned when needed.")
         else:
             recommended_method = "mixed_anova"
             recommended_engine = "pingouin"
-            if sphericity and sphericity.get("applies", False):
-                rationale.append("Sphericity will be handled through auto-correction when needed.")
-            else:
-                rationale.append("Balanced repeated-measures structure supports ANOVA-based analysis.")
+            rationale.append("Balanced group-by-time repeated structure supports Two-way Mixed ANOVA.")
+            if any_non_normal:
+                fallback_reason = (
+                    "A full nonparametric mixed-design omnibus is not available in the current dependency set. "
+                    "Mixed ANOVA is still the executable engine for balanced group-by-time designs."
+                )
+                rationale.append("Normality concerns remain, so the result should be interpreted with caution.")
+            elif sphericity and sphericity.get("applies"):
+                rationale.append("Sphericity metadata will be evaluated for the within-subject time factor.")
 
     if any(count < 2 for count in n_per_group.values()) if n_per_group else False:
-        rationale.append("Small group sizes reduce reliability of assumption tests and post-hoc comparisons.")
+        rationale.append("Some groups have fewer than two observations, which weakens assumption tests and post-hoc stability.")
 
     return {
         "recommended_method": recommended_method,

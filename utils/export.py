@@ -6,6 +6,9 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
+TABLE_KEYS = ("omnibus", "posthoc_table", "fixed_effects", "contrast_table")
+
+
 def build_export_bundle(
     normalized_df: pd.DataFrame,
     analysis_results: dict[str, dict],
@@ -39,14 +42,27 @@ def figure_to_png_bytes(fig: go.Figure) -> bytes | None:
 
 
 def results_to_csv_text(results: dict[str, dict]) -> str:
-    rows: list[dict] = []
+    frames: list[pd.DataFrame] = []
     for dv_col, result in results.items():
-        rows.append(
-            {
-                "dv_col": dv_col,
-                "analysis_status": result.get("analysis_status"),
-                "used_method": result.get("used_method", result.get("used_formula")),
-                "warnings": json.dumps(result.get("warnings", []), ensure_ascii=True),
-            }
+        summary_row = pd.DataFrame(
+            [
+                {
+                    "section": "summary",
+                    "dv_col": dv_col,
+                    "analysis_status": result.get("analysis_status"),
+                    "used_method": result.get("used_method", result.get("used_formula")),
+                    "warnings": json.dumps(result.get("warnings", []), ensure_ascii=True),
+                }
+            ]
         )
-    return pd.DataFrame(rows).to_csv(index=False)
+        frames.append(summary_row)
+        for key in TABLE_KEYS:
+            table = result.get(key)
+            if isinstance(table, pd.DataFrame) and not table.empty:
+                export_table = table.copy()
+                export_table.insert(0, "dv_col", dv_col)
+                export_table.insert(1, "section", key)
+                frames.append(export_table)
+    if not frames:
+        return ""
+    return pd.concat(frames, ignore_index=True, sort=False).to_csv(index=False)
