@@ -13,6 +13,29 @@ from utils.viz_cross import make_figure as make_cross_figure
 from utils.viz_longitudinal import make_figure as make_longitudinal_figure
 
 
+CHROME_CSS = """
+<style>
+#MainMenu {visibility: hidden;}
+header[data-testid=\"stHeader\"] {display: none;}
+footer {visibility: hidden;}
+div[data-testid=\"stToolbar\"] {display: none;}
+div[data-testid=\"stDecoration\"] {display: none;}
+div[data-testid=\"stStatusWidget\"] {display: none;}
+div[data-testid=\"stMainBlockContainer\"] {
+    padding-top: 0.75rem;
+    padding-bottom: 1.5rem;
+}
+div.block-container {
+    padding-top: 0.75rem;
+    padding-bottom: 1.5rem;
+}
+h1, h2, h3 {
+    margin-top: 0;
+}
+</style>
+"""
+
+
 KEEP_LONG_BLOCKING_REASON = (
     "Inferential analysis is blocked because technical replicates were preserved with keep_long and the app does not model replicate structure explicitly."
 )
@@ -22,6 +45,7 @@ REPEATED_STRUCTURE_BLOCKING_REASON = (
 )
 
 
+st.markdown(CHROME_CSS, unsafe_allow_html=True)
 st.title("Analysis")
 
 df = st.session_state.normalized_df
@@ -318,3 +342,4 @@ if st.session_state.blocking_reasons:
 if st.session_state.suggested_actions:
     for action in st.session_state.suggested_actions:
         st.info(action)
+

@@ -9,6 +9,30 @@ from utils.state import reset_analysis_state
 from utils.validators import validate_normalized_df
 
 
+CHROME_CSS = """
+<style>
+#MainMenu {visibility: hidden;}
+header[data-testid=\"stHeader\"] {display: none;}
+footer {visibility: hidden;}
+div[data-testid=\"stToolbar\"] {display: none;}
+div[data-testid=\"stDecoration\"] {display: none;}
+div[data-testid=\"stStatusWidget\"] {display: none;}
+div[data-testid=\"stMainBlockContainer\"] {
+    padding-top: 0.75rem;
+    padding-bottom: 1.5rem;
+}
+div.block-container {
+    padding-top: 0.75rem;
+    padding-bottom: 1.5rem;
+}
+h1, h2, h3 {
+    margin-top: 0;
+}
+</style>
+"""
+
+
+st.markdown(CHROME_CSS, unsafe_allow_html=True)
 st.title("Upload And Mapping")
 
 raw_input = st.text_area(
@@ -195,3 +219,4 @@ if st.session_state.blocking_reasons:
 
 if st.session_state.suggested_actions:
     st.write(pd.DataFrame({"suggested_actions": st.session_state.suggested_actions}))
+

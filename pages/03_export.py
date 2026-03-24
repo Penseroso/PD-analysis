@@ -5,6 +5,30 @@ import streamlit as st
 from utils.export import build_export_bundle
 
 
+CHROME_CSS = """
+<style>
+#MainMenu {visibility: hidden;}
+header[data-testid=\"stHeader\"] {display: none;}
+footer {visibility: hidden;}
+div[data-testid=\"stToolbar\"] {display: none;}
+div[data-testid=\"stDecoration\"] {display: none;}
+div[data-testid=\"stStatusWidget\"] {display: none;}
+div[data-testid=\"stMainBlockContainer\"] {
+    padding-top: 0.75rem;
+    padding-bottom: 1.5rem;
+}
+div.block-container {
+    padding-top: 0.75rem;
+    padding-bottom: 1.5rem;
+}
+h1, h2, h3 {
+    margin-top: 0;
+}
+</style>
+"""
+
+
+st.markdown(CHROME_CSS, unsafe_allow_html=True)
 st.title("Export")
 
 if not st.session_state.analysis_results:
@@ -47,3 +71,4 @@ if bundle:
         )
     for warning in bundle.get("warnings", []):
         st.warning(warning)
+
