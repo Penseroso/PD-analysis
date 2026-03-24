@@ -20,6 +20,7 @@ def make_figure(
     if dv_col is None or dv_col not in df.columns or "time" not in df.columns:
         return fig
 
+    dv_label = result.get("dv_label") or dv_col
     resolved_time_order = _resolve_time_order(df, result, time_order)
     summary = df.copy()
     summary["time"] = pd.Categorical(summary["time"].astype(str), categories=resolved_time_order, ordered=True)
@@ -41,7 +42,7 @@ def make_figure(
 
     _add_longitudinal_annotations(fig, summary, dv_col, result.get("star_map", []), resolved_time_order)
     fig.update_xaxes(categoryorder="array", categoryarray=resolved_time_order)
-    fig.update_layout(template=config.get("template", "plotly_white"), title=f"Longitudinal plot: {dv_col}")
+    fig.update_layout(template=config.get("template", "plotly_white"), title=f"Longitudinal plot: {dv_label}")
     return fig
 
 

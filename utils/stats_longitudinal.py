@@ -58,7 +58,6 @@ def run_longitudinal(
     group_col: str,
     subject_col: str,
     time_col: str,
-    control_group: str | None,
     between_factors: list[str],
     factor2_col: str | None,
     method: str,

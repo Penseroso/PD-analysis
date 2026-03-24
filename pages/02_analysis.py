@@ -173,6 +173,7 @@ if st.button("Run Analysis", type="primary"):
     aggregated_blocking: list[str] = []
 
     for dv_col in selected_dv_cols:
+        dv_label = _label_for_dv(dv_col)
         if data_type == "cross":
             assumptions = compute_cross_assumptions(df=df, dv_col=dv_col, group_col="group")
             selector_result = select_method(
@@ -196,6 +197,7 @@ if st.button("Run Analysis", type="primary"):
                     "omnibus": None,
                     "posthoc_table": None,
                     "dv_col": dv_col,
+                    "dv_label": dv_label,
                     "selector": selector_result,
                 }
             else:
@@ -208,6 +210,7 @@ if st.button("Run Analysis", type="primary"):
                 )
                 result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
                 result["selector"] = selector_result
+                result["dv_label"] = dv_label
             analysis_results[dv_col] = result
             if result.get("analysis_status") == "ready":
                 figure_objects[dv_col] = make_cross_figure(df=df, result=result, config=DEFAULT_FIGURE_CONFIG)
@@ -244,6 +247,7 @@ if st.button("Run Analysis", type="primary"):
                     "omnibus": None,
                     "posthoc_table": None,
                     "dv_col": dv_col,
+                    "dv_label": dv_label,
                     "selector": selector_result,
                     "time_order": time_order,
                 }
@@ -260,6 +264,7 @@ if st.button("Run Analysis", type="primary"):
                     time_order=time_order,
                 )
                 result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
+                result["dv_label"] = dv_label
             else:
                 result = run_longitudinal(
                     df=df,
@@ -267,13 +272,13 @@ if st.button("Run Analysis", type="primary"):
                     group_col="group",
                     subject_col="subject",
                     time_col="time",
-                    control_group=None,
                     between_factors=between_factors,
                     factor2_col=factor2_col,
                     method=plan["final_method"],
                     time_order=time_order,
                 )
                 result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
+                result["dv_label"] = dv_label
             result["selector"] = selector_result
             result["time_order"] = time_order
             analysis_results[dv_col] = result

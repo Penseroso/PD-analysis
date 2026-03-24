@@ -229,7 +229,6 @@ def execute_analysis(df: pd.DataFrame, spec: dict, plan: dict, dv_col: str, vali
         group_col="group",
         subject_col="subject",
         time_col="time",
-        control_group=None,
         between_factors=spec.get("between_factors", ["group"]),
         factor2_col=spec.get("factor2_col"),
         method=plan["final_method"],

@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
+
 def make_figure(
     df: pd.DataFrame,
     result: dict,
@@ -13,6 +14,8 @@ def make_figure(
     dv_col = result.get("dv_col") or next((col for col in df.columns if col.startswith("value_")), None)
     if dv_col is None or dv_col not in df.columns:
         return fig
+
+    dv_label = result.get("dv_label") or dv_col
 
     for group_name, group_df in df.groupby("group", sort=False):
         fig.add_trace(
@@ -26,8 +29,9 @@ def make_figure(
         )
 
     _add_cross_annotations(fig, df, dv_col, result.get("star_map", []))
-    fig.update_layout(template=config.get("template", "plotly_white"), title=f"Cross-sectional plot: {dv_col}")
+    fig.update_layout(template=config.get("template", "plotly_white"), title=f"Cross-sectional plot: {dv_label}")
     return fig
+
 
 
 def make_multi_biomarker_figure(
@@ -36,6 +40,7 @@ def make_multi_biomarker_figure(
     config: dict,
 ) -> go.Figure:
     return make_figure(df=df, result=next(iter(results_by_dv.values()), {}), config=config)
+
 
 
 def _add_cross_annotations(fig: go.Figure, df: pd.DataFrame, dv_col: str, star_map: list[dict]) -> None:

@@ -16,6 +16,7 @@ if st.button("Build Export Bundle", type="primary"):
         normalized_df=st.session_state.normalized_df,
         analysis_results=st.session_state.analysis_results,
         figure_objects=st.session_state.figure_objects,
+        value_display_map=st.session_state.value_display_map,
     )
 
 bundle = st.session_state.export_bundle
