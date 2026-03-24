@@ -11,6 +11,7 @@ from scipy import stats
 PVALUE_COLUMNS = ("p_corr", "pvalue", "p_unc", "pval")
 
 
+
 def compute_longitudinal_assumptions(
     df: pd.DataFrame,
     dv_col: str,
@@ -47,6 +48,7 @@ def compute_longitudinal_assumptions(
 
     sphericity = _compute_sphericity(clean_df, dv_col, subject_col, time_col, group_col)
     return {"normality": normality, "sphericity": sphericity}
+
 
 
 def run_longitudinal(
@@ -121,6 +123,7 @@ def run_longitudinal(
             omnibus, posthoc_table, omnibus_effects, pairwise_effects, correction_applied = _run_rm_anova(
                 clean_df, dv_col, subject_col, time_col
             )
+            resolved_method = "rm_anova"
         engine_used = "pingouin"
     else:
         if resolved_method == "friedman":
@@ -137,8 +140,6 @@ def run_longitudinal(
         )
         engine_used = "pingouin"
         resolved_method = "mixed_anova"
-        if control_group is None:
-            warnings.append("Control group was not selected. Pairwise mixed-design comparisons are reported without control-specific filtering.")
 
     return {
         "analysis_status": "ready",
@@ -160,6 +161,7 @@ def run_longitudinal(
     }
 
 
+
 def _prepare_longitudinal_df(
     df: pd.DataFrame,
     dv_col: str,
@@ -177,6 +179,7 @@ def _prepare_longitudinal_df(
     return clean_df.dropna(subset=[dv_col, subject_col, time_col])
 
 
+
 def _resolve_longitudinal_method(method: str, assumptions: dict, df: pd.DataFrame, group_col: str) -> str:
     if method != "auto":
         return method
@@ -184,6 +187,7 @@ def _resolve_longitudinal_method(method: str, assumptions: dict, df: pd.DataFram
     if df[group_col].nunique(dropna=True) <= 1:
         return "friedman" if any_non_normal else "rm_anova"
     return "mixed_anova"
+
 
 
 def _compute_sphericity(
@@ -272,6 +276,7 @@ def _compute_sphericity(
     return output
 
 
+
 def _run_rm_anova(
     df: pd.DataFrame,
     dv_col: str,
@@ -314,7 +319,7 @@ def _run_rm_anova(
         padjust="bonf",
         effsize="hedges",
     )
-    posthoc = _format_pairwise_time_tests(pairwise, time_col, "pairwise_parametric")
+    posthoc = _format_pairwise_time_tests(pairwise, interpretation_basis="pairwise_parametric")
     pairwise_effects = posthoc[["time_a", "time_b", "effect_estimate", "effect_metric", "interpretation_basis"]].copy()
     omnibus_effects = omnibus[["term", "effect_estimate", "effect_metric", "interpretation_basis"]].copy()
     correction_applied = {
@@ -329,6 +334,7 @@ def _run_rm_anova(
         "p_spher": _safe_float(effect_row.get("p_spher")),
     }
     return omnibus, posthoc, omnibus_effects, pairwise_effects, correction_applied
+
 
 
 def _run_friedman(
@@ -371,9 +377,9 @@ def _run_friedman(
         p_corr = min(float(wilcoxon.pvalue) * n_tests, 1.0)
         rows.append(
             {
+                "annotation_type": "longitudinal_time_pair_within_group",
                 "time_a": str(time_a),
                 "time_b": str(time_b),
-                "time": f"{time_a} vs {time_b}",
                 "comparison": f"{time_a} vs {time_b}",
                 "test": "wilcoxon",
                 "statistic": _safe_float(wilcoxon.statistic),
@@ -389,9 +395,9 @@ def _run_friedman(
     if posthoc.empty:
         posthoc = pd.DataFrame(
             columns=[
+                "annotation_type",
                 "time_a",
                 "time_b",
-                "time",
                 "comparison",
                 "test",
                 "statistic",
@@ -406,6 +412,7 @@ def _run_friedman(
     omnibus_effects = omnibus[["term", "effect_estimate", "effect_metric", "interpretation_basis"]].copy()
     pairwise_effects = posthoc[["time_a", "time_b", "effect_estimate", "effect_metric", "interpretation_basis"]].copy()
     return omnibus, posthoc, omnibus_effects, pairwise_effects
+
 
 
 def _run_mixed_anova(
@@ -472,7 +479,8 @@ def _run_mixed_anova(
     return omnibus, posthoc, omnibus_effects, pairwise_effects, correction_applied
 
 
-def _format_pairwise_time_tests(pairwise: pd.DataFrame, time_col: str, interpretation_basis: str) -> pd.DataFrame:
+
+def _format_pairwise_time_tests(pairwise: pd.DataFrame, interpretation_basis: str) -> pd.DataFrame:
     posthoc = pairwise.rename(
         columns={
             "A": "time_a",
@@ -484,15 +492,15 @@ def _format_pairwise_time_tests(pairwise: pd.DataFrame, time_col: str, interpret
     ).copy()
     if "pvalue" not in posthoc.columns:
         posthoc["pvalue"] = posthoc.get("p_unc")
-    posthoc["time"] = posthoc["time_a"].astype(str) + " vs " + posthoc["time_b"].astype(str)
-    posthoc["comparison"] = posthoc["time"]
+    posthoc["annotation_type"] = "longitudinal_time_pair_within_group"
+    posthoc["comparison"] = posthoc["time_a"].astype(str) + " vs " + posthoc["time_b"].astype(str)
     posthoc["test"] = "pairwise_ttests"
     posthoc["effect_metric"] = "hedges_g"
     posthoc["interpretation_basis"] = interpretation_basis
     ordered = [
+        "annotation_type",
         "time_a",
         "time_b",
-        "time",
         "comparison",
         "test",
         "statistic",
@@ -506,34 +514,83 @@ def _format_pairwise_time_tests(pairwise: pd.DataFrame, time_col: str, interpret
     return posthoc[[column for column in ordered if column in posthoc.columns]]
 
 
+
 def _format_pairwise_mixed_tests(pairwise: pd.DataFrame, time_col: str, group_col: str) -> pd.DataFrame:
     posthoc = pairwise.rename(columns={"T": "statistic", "p_corr": "pvalue", "hedges": "effect_estimate"}).copy()
     if "pvalue" not in posthoc.columns:
         posthoc["pvalue"] = posthoc.get("p_unc")
 
-    def build_comparison(row: pd.Series) -> str:
+    rows: list[dict] = []
+    for _, row in posthoc.iterrows():
         contrast = str(row.get("Contrast", ""))
-        if contrast == group_col:
-            return f"{row.get('A')} vs {row.get('B')}"
-        if contrast == time_col:
-            return f"{row.get('A')} vs {row.get('B')}"
-        if contrast.lower() in {"time * group", f"{time_col} * {group_col}".lower()}:
-            return f"{row.get(time_col)}: {row.get('A')} vs {row.get('B')}"
-        return f"{row.get('A')} vs {row.get('B')}"
+        record = {
+            "Contrast": contrast,
+            "test": "pairwise_tests",
+            "statistic": _safe_float(row.get("statistic")),
+            "pvalue": _safe_float(row.get("pvalue")),
+            "p_unc": _safe_float(row.get("p_unc")),
+            "p_adjust": row.get("p_adjust"),
+            "effect_estimate": _safe_float(row.get("effect_estimate")),
+            "effect_metric": "hedges_g",
+            "interpretation_basis": "pairwise_parametric_interaction" if "*" in contrast else "pairwise_parametric",
+        }
+        lower_contrast = contrast.lower()
+        if "*" in lower_contrast and pd.notna(row.get(time_col)):
+            record.update(
+                {
+                    "annotation_type": "longitudinal_group_pair_at_time",
+                    "time": str(row.get(time_col)),
+                    "group_a": str(row.get("A")),
+                    "group_b": str(row.get("B")),
+                    "comparison": f"{row.get(time_col)}: {row.get('A')} vs {row.get('B')}",
+                }
+            )
+        elif lower_contrast == time_col.lower():
+            record.update(
+                {
+                    "annotation_type": "longitudinal_time_pair_within_group",
+                    "time_a": str(row.get("A")),
+                    "time_b": str(row.get("B")),
+                    "comparison": f"{row.get('A')} vs {row.get('B')}",
+                }
+            )
+            if group_col in row.index and pd.notna(row.get(group_col)):
+                record["group"] = str(row.get(group_col))
+        elif lower_contrast == group_col.lower():
+            record.update(
+                {
+                    "annotation_type": "cross_group_pair",
+                    "group_a": str(row.get("A")),
+                    "group_b": str(row.get("B")),
+                    "comparison": f"{row.get('A')} vs {row.get('B')}",
+                }
+            )
+            if time_col in row.index and pd.notna(row.get(time_col)):
+                record["time"] = str(row.get(time_col))
+        else:
+            record.update(
+                {
+                    "annotation_type": "cross_group_pair",
+                    "comparison": f"{row.get('A')} vs {row.get('B')}",
+                }
+            )
+            if pd.notna(row.get(time_col)):
+                record["time"] = str(row.get(time_col))
+            if pd.notna(row.get("A")):
+                record["group_a"] = str(row.get("A"))
+            if pd.notna(row.get("B")):
+                record["group_b"] = str(row.get("B"))
+        rows.append(record)
 
-    posthoc["comparison"] = posthoc.apply(build_comparison, axis=1)
-    posthoc["test"] = "pairwise_tests"
-    posthoc["effect_metric"] = "hedges_g"
-    posthoc["interpretation_basis"] = np.where(
-        posthoc.get("Contrast", "").astype(str).str.contains("\\*", regex=True),
-        "pairwise_parametric_interaction",
-        "pairwise_parametric",
-    )
     ordered = [
+        "annotation_type",
         "Contrast",
-        time_col,
-        "A",
-        "B",
+        "time",
+        "group",
+        "group_a",
+        "group_b",
+        "time_a",
+        "time_b",
         "comparison",
         "test",
         "statistic",
@@ -544,8 +601,14 @@ def _format_pairwise_mixed_tests(pairwise: pd.DataFrame, time_col: str, group_co
         "effect_metric",
         "interpretation_basis",
     ]
-    available = [column for column in ordered if column in posthoc.columns]
-    return posthoc[available].rename(columns={time_col: "time", "A": "group_a", "B": "group_b"})
+    formatted = pd.DataFrame(rows)
+    if formatted.empty:
+        return pd.DataFrame(columns=ordered)
+    for column in ordered:
+        if column not in formatted.columns:
+            formatted[column] = None
+    return formatted[ordered]
+
 
 
 def _paired_rank_biserial(diff: np.ndarray) -> float | None:
@@ -560,6 +623,7 @@ def _paired_rank_biserial(diff: np.ndarray) -> float | None:
     if denom == 0:
         return None
     return _safe_float((pos - neg) / denom)
+
 
 
 def _build_star_map(posthoc_table: pd.DataFrame | None) -> list[dict]:
@@ -577,15 +641,28 @@ def _build_star_map(posthoc_table: pd.DataFrame | None) -> list[dict]:
         if label is None:
             continue
         record = {
+            "annotation_type": getattr(row, "annotation_type", _infer_annotation_type(row)),
             "comparison": getattr(row, "comparison", None),
             "pvalue": float(pvalue),
             "label": label,
         }
-        for field in ("time", "time_a", "time_b", "group_a", "group_b", "factor2", "Contrast"):
+        for field in ("time", "time_a", "time_b", "group", "group_a", "group_b", "factor2", "Contrast"):
             if hasattr(row, field):
                 record[field] = getattr(row, field)
         star_map.append(record)
     return star_map
+
+
+
+def _infer_annotation_type(row) -> str:
+    if hasattr(row, "time_a") and hasattr(row, "time_b"):
+        return "longitudinal_time_pair_within_group"
+    if hasattr(row, "time") and hasattr(row, "group_a") and hasattr(row, "group_b"):
+        return "longitudinal_group_pair_at_time"
+    if hasattr(row, "group_a") and hasattr(row, "group_b"):
+        return "cross_group_pair"
+    return "cross_group_pair"
+
 
 
 def _safe_float(value: object) -> float | None:
@@ -603,6 +680,7 @@ def _safe_float(value: object) -> float | None:
     return float(value)
 
 
+
 def _bool_or_none(value: object) -> bool | None:
     if isinstance(value, pd.Series):
         if value.empty:
@@ -618,6 +696,7 @@ def _bool_or_none(value: object) -> bool | None:
     return bool(value)
 
 
+
 def _pvalue_to_label(pvalue: float) -> str | None:
     if pvalue < 0.001:
         return "***"
@@ -626,3 +705,4 @@ def _pvalue_to_label(pvalue: float) -> str | None:
     if pvalue < 0.05:
         return "*"
     return None
+

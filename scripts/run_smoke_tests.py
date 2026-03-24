@@ -29,6 +29,7 @@ class SmokeResult:
     details: list[str]
 
 
+
 def main() -> int:
     expectations = load_expectations(EXPECTATIONS_PATH)
     results = [run_case(name, spec) for name, spec in expectations.items()]
@@ -42,6 +43,7 @@ def main() -> int:
     passed_count = sum(result.passed for result in results)
     print(f"\nSummary: {passed_count}/{len(results)} passed")
     return 0 if passed_count == len(results) else 1
+
 
 
 def run_case(name: str, spec: dict) -> SmokeResult:
@@ -100,6 +102,7 @@ def run_case(name: str, spec: dict) -> SmokeResult:
     return SmokeResult(name=name, passed=not failures, details=details)
 
 
+
 def load_expectations(path: Path) -> dict:
     lines = path.read_text(encoding="utf-8").splitlines()
     output: dict[str, dict] = {}
@@ -147,6 +150,7 @@ def load_expectations(path: Path) -> dict:
     return output
 
 
+
 def _parse_scalar(value: str):
     if value == "null":
         return None
@@ -167,6 +171,7 @@ def _parse_scalar(value: str):
         return value
 
 
+
 def build_assumptions(df: pd.DataFrame, spec: dict, dv_col: str) -> dict:
     if spec["data_type"] == "cross":
         return compute_cross_assumptions(df=df, dv_col=dv_col, group_col="group")
@@ -183,15 +188,17 @@ def build_assumptions(df: pd.DataFrame, spec: dict, dv_col: str) -> dict:
     )
 
 
+
 def execute_analysis(df: pd.DataFrame, spec: dict, plan: dict, dv_col: str, validation: dict | None = None) -> dict:
-    if plan["final_method"] == "blocked":
+    if plan["analysis_status"] == "blocked":
         return {
             "analysis_status": "blocked",
+            "used_method": plan.get("final_method"),
             "omnibus": None,
             "posthoc_table": None,
             "star_map": [],
-            "warnings": validation.get("warnings", []) if validation else [],
-            "blocking_reasons": validation.get("blocking_reasons", []) if validation else [],
+            "warnings": plan.get("warnings", validation.get("warnings", []) if validation else []),
+            "blocking_reasons": plan.get("blocking_reasons", validation.get("blocking_reasons", []) if validation else []),
             "suggested_actions": validation.get("suggested_actions", []) if validation else [],
         }
 
@@ -213,6 +220,7 @@ def execute_analysis(df: pd.DataFrame, spec: dict, plan: dict, dv_col: str, vali
             group_col="group",
             factor2_col=spec.get("factor2_col"),
             formula_mode="default",
+            reference_group=spec.get("reference_group", spec.get("control_group")),
         )
 
     return run_longitudinal(
@@ -221,11 +229,12 @@ def execute_analysis(df: pd.DataFrame, spec: dict, plan: dict, dv_col: str, vali
         group_col="group",
         subject_col="subject",
         time_col="time",
-        control_group=spec.get("control_group"),
+        control_group=None,
         between_factors=spec.get("between_factors", ["group"]),
         factor2_col=spec.get("factor2_col"),
         method=plan["final_method"],
     )
+
 
 
 def check_expected_status(spec: dict, result: dict, failures: list[str]) -> None:
@@ -238,6 +247,7 @@ def check_expected_status(spec: dict, result: dict, failures: list[str]) -> None
         failures.append(
             f"analysis_status mismatch: expected one of {spec['expected_analysis_status_any_of']}, got {actual}"
         )
+
 
 
 def check_selector(spec: dict, selector_result: dict, failures: list[str]) -> None:
@@ -253,6 +263,7 @@ def check_selector(spec: dict, selector_result: dict, failures: list[str]) -> No
             failures.append(
                 f"recommended_engine mismatch: expected {spec['expected_recommended_engine']}, got {actual_engine}"
             )
+
 
 
 def check_result_shape(spec: dict, result: dict, failures: list[str]) -> None:
@@ -317,6 +328,7 @@ def check_result_shape(spec: dict, result: dict, failures: list[str]) -> None:
         failures.append("expected fixed_effects DataFrame to exist")
     if spec.get("contrast_table_should_exist") and not isinstance(result.get("contrast_table"), pd.DataFrame):
         failures.append("expected contrast_table DataFrame to exist")
+
 
 
 def check_messages(spec: dict, selector_result: dict, result: dict, failures: list[str]) -> None:

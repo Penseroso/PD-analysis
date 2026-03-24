@@ -25,8 +25,10 @@ if bundle:
             "Download HTML", data=bundle["html"], file_name="figures.html", mime="text/html"
         )
     if bundle.get("png") is not None:
+        file_name = bundle.get("png_name") or "figure.png"
+        mime = bundle.get("png_mime") or "image/png"
         st.download_button(
-            "Download PNG", data=bundle["png"], file_name="figure.png", mime="image/png"
+            "Download PNG", data=bundle["png"], file_name=file_name, mime=mime
         )
     if bundle.get("csv") is not None:
         st.download_button(
@@ -42,3 +44,5 @@ if bundle:
             file_name="stats_results.csv",
             mime="text/csv",
         )
+    for warning in bundle.get("warnings", []):
+        st.warning(warning)

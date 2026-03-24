@@ -6,6 +6,9 @@ from patsy import build_design_matrices
 import statsmodels.formula.api as smf
 
 
+ANNOTATION_TYPE = "mixedlm_reference_contrast"
+
+
 def build_mixedlm_formula(
     dv_col: str,
     time_col: str,
@@ -18,6 +21,7 @@ def build_mixedlm_formula(
     return f"{dv_col} ~ C({time_col}) * C({group_col})"
 
 
+
 def run_mixedlm(
     df: pd.DataFrame,
     dv_col: str,
@@ -26,6 +30,7 @@ def run_mixedlm(
     group_col: str,
     factor2_col: str | None,
     formula_mode: str,
+    reference_group: str | None = None,
 ) -> dict:
     warnings: list[str] = []
     blocking_reasons: list[str] = []
@@ -48,7 +53,9 @@ def run_mixedlm(
             "contrast_table": None,
             "star_map": [],
             "effect_sizes": None,
+            "used_method": "mixedlm",
             "used_formula": "",
+            "engine_used": "statsmodels",
             "warnings": warnings,
             "blocking_reasons": blocking_reasons,
             "suggested_actions": suggested_actions,
@@ -64,7 +71,9 @@ def run_mixedlm(
             "contrast_table": None,
             "star_map": [],
             "effect_sizes": None,
+            "used_method": "mixedlm",
             "used_formula": "",
+            "engine_used": "statsmodels",
             "warnings": warnings,
             "blocking_reasons": ["No complete observations are available for MixedLM fitting."],
             "suggested_actions": ["Check missing values and verify the selected biomarker."],
@@ -83,7 +92,9 @@ def run_mixedlm(
             "contrast_table": None,
             "star_map": [],
             "effect_sizes": None,
+            "used_method": "mixedlm",
             "used_formula": used_formula,
+            "engine_used": "statsmodels",
             "warnings": warnings,
             "blocking_reasons": [f"MixedLM fitting failed: {exc}"],
             "suggested_actions": ["Inspect missingness, small cell sizes, or simplify the design."],
@@ -95,13 +106,14 @@ def run_mixedlm(
 
     fixed_effects = _build_fixed_effects_table(result)
     effect_sizes = _build_effect_sizes_table(fixed_effects)
-    contrast_table, contrast_warnings = _build_contrast_table(
+    contrast_table, contrast_warnings, reference_group_used = _build_contrast_table(
         result=result,
         model=model,
         fit_df=fit_df,
         time_col=time_col,
         group_col=group_col,
         factor2_col=factor2_col,
+        reference_group=reference_group,
     )
     warnings.extend(contrast_warnings)
 
@@ -112,12 +124,16 @@ def run_mixedlm(
         "contrast_table": contrast_table,
         "star_map": _build_star_map(contrast_table),
         "effect_sizes": effect_sizes,
+        "used_method": "mixedlm",
         "used_formula": used_formula,
+        "engine_used": "statsmodels",
+        "reference_group_used": reference_group_used,
         "warnings": sorted(set(warnings)),
         "blocking_reasons": [],
         "suggested_actions": [],
         "dv_col": dv_col,
     }
+
 
 
 def _prepare_mixedlm_df(
@@ -145,6 +161,7 @@ def _prepare_mixedlm_df(
     return fit_df
 
 
+
 def _fit_mixedlm(model):
     last_error: Exception | None = None
     for kwargs in (
@@ -158,6 +175,7 @@ def _fit_mixedlm(model):
     if last_error is None:
         raise RuntimeError("Unknown MixedLM fitting failure")
     raise last_error
+
 
 
 def _build_fixed_effects_table(result) -> pd.DataFrame:
@@ -177,11 +195,13 @@ def _build_fixed_effects_table(result) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+
 def _build_effect_sizes_table(fixed_effects: pd.DataFrame) -> pd.DataFrame:
     effect_sizes = fixed_effects.rename(columns={"beta": "effect_estimate", "se": "standard_error"}).copy()
     effect_sizes["effect_metric"] = "beta_se_ci"
     effect_sizes["interpretation_basis"] = "mixedlm"
     return effect_sizes
+
 
 
 def _build_contrast_table(
@@ -191,7 +211,8 @@ def _build_contrast_table(
     time_col: str,
     group_col: str,
     factor2_col: str | None,
-) -> tuple[pd.DataFrame, list[str]]:
+    reference_group: str | None,
+) -> tuple[pd.DataFrame, list[str], str | None]:
     warnings: list[str] = []
     group_levels = fit_df[group_col].cat.categories.tolist() if hasattr(fit_df[group_col], "cat") else sorted(fit_df[group_col].astype(str).unique())
     time_levels = fit_df[time_col].cat.categories.tolist() if hasattr(fit_df[time_col], "cat") else sorted(fit_df[time_col].astype(str).unique())
@@ -200,17 +221,25 @@ def _build_contrast_table(
         factor2_levels = fit_df[factor2_col].cat.categories.tolist() if hasattr(fit_df[factor2_col], "cat") else sorted(fit_df[factor2_col].astype(str).unique())
 
     if len(group_levels) < 2:
-        return pd.DataFrame(columns=["contrast", "estimate", "se", "ci_low", "ci_high", "pvalue"]), warnings
+        return pd.DataFrame(columns=["contrast", "estimate", "se", "ci_low", "ci_high", "pvalue"]), warnings, None
 
-    reference_group = group_levels[0]
+    reference_group_used = reference_group if reference_group in group_levels else group_levels[0]
+    if reference_group and reference_group not in group_levels:
+        warnings.append(
+            f"Reference group '{reference_group}' was not found in the fitted data. Falling back to '{reference_group_used}'."
+        )
+    elif reference_group is None:
+        warnings.append(f"Reference group was not selected. Falling back to '{reference_group_used}'.")
+
     rows: list[dict] = []
+    comparison_groups = [group_level for group_level in group_levels if group_level != reference_group_used]
     for time_level in time_levels:
         for factor2_level in factor2_levels:
-            base_row = {time_col: time_level, group_col: reference_group}
+            base_row = {time_col: time_level, group_col: reference_group_used}
             if factor2_col:
                 base_row[factor2_col] = factor2_level
             base_design = np.asarray(build_design_matrices([model.data.design_info], pd.DataFrame([base_row]))[0][0], dtype=float)
-            for group_level in group_levels[1:]:
+            for group_level in comparison_groups:
                 comp_row = {time_col: time_level, group_col: group_level}
                 if factor2_col:
                     comp_row[factor2_col] = factor2_level
@@ -222,9 +251,10 @@ def _build_contrast_table(
                 ci = np.asarray(test_result.conf_int())
                 pvalue = _safe_float(np.asarray(test_result.pvalue).squeeze())
                 row = {
-                    "contrast": f"{reference_group} vs {group_level} at {time_level}",
+                    "annotation_type": ANNOTATION_TYPE,
+                    "contrast": f"{reference_group_used} vs {group_level} at {time_level}",
                     "time": str(time_level),
-                    "group_a": str(reference_group),
+                    "group_a": str(reference_group_used),
                     "group_b": str(group_level),
                     "estimate": estimate,
                     "se": se,
@@ -234,19 +264,21 @@ def _build_contrast_table(
                     "effect_estimate": estimate,
                     "effect_metric": "beta_se_ci",
                     "interpretation_basis": "mixedlm_contrast",
-                    "comparison": f"{reference_group} vs {group_level}",
+                    "comparison": f"{reference_group_used} vs {group_level}",
+                    "reference_group": str(reference_group_used),
                 }
                 if factor2_col:
                     row["factor2"] = str(factor2_level)
-                    row["contrast"] = f"{reference_group} vs {group_level} at {time_level} | {factor2_col}={factor2_level}"
+                    row["contrast"] = f"{reference_group_used} vs {group_level} at {time_level} | {factor2_col}={factor2_level}"
                 rows.append(row)
 
     if not rows:
         warnings.append("No reference-cell contrasts were generated for the fitted MixedLM.")
-        return pd.DataFrame(columns=["contrast", "estimate", "se", "ci_low", "ci_high", "pvalue"]), warnings
+        return pd.DataFrame(columns=["contrast", "estimate", "se", "ci_low", "ci_high", "pvalue"]), warnings, reference_group_used
 
     contrast_table = pd.DataFrame(rows)
-    return contrast_table, warnings
+    return contrast_table, warnings, reference_group_used
+
 
 
 def _build_star_map(contrast_table: pd.DataFrame | None) -> list[dict]:
@@ -261,6 +293,7 @@ def _build_star_map(contrast_table: pd.DataFrame | None) -> list[dict]:
         if label is None:
             continue
         record = {
+            "annotation_type": getattr(row, "annotation_type", ANNOTATION_TYPE),
             "comparison": getattr(row, "comparison", getattr(row, "contrast", None)),
             "time": getattr(row, "time", None),
             "group_a": getattr(row, "group_a", None),
@@ -270,8 +303,11 @@ def _build_star_map(contrast_table: pd.DataFrame | None) -> list[dict]:
         }
         if hasattr(row, "factor2"):
             record["factor2"] = getattr(row, "factor2")
+        if hasattr(row, "reference_group"):
+            record["reference_group"] = getattr(row, "reference_group")
         star_map.append(record)
     return star_map
+
 
 
 def _safe_float(value: object) -> float | None:
@@ -283,6 +319,7 @@ def _safe_float(value: object) -> float | None:
     except TypeError:
         pass
     return float(value)
+
 
 
 def _pvalue_to_label(pvalue: float) -> str | None:

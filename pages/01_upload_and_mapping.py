@@ -19,17 +19,30 @@ raw_input = st.text_area(
 
 if st.button("Parse Input", type="primary"):
     st.session_state.raw_input_text = raw_input
-    st.session_state.raw_df = parse_pasted_table(raw_input)
-    st.session_state.preview_df = (
-        st.session_state.raw_df.copy() if st.session_state.raw_df is not None else None
-    )
-    schema_result = detect_schema_candidates(st.session_state.raw_df)
-    st.session_state.detected_schema = schema_result["detected_schema"]
-    st.session_state.analysis_status = schema_result["analysis_status"]
-    st.session_state.warnings = schema_result["warnings"]
     reset_analysis_state()
+    parse_result = parse_pasted_table(raw_input)
+    st.session_state.raw_df = parse_result["raw_df"]
+    st.session_state.preview_df = (
+        parse_result["raw_df"].copy() if parse_result["raw_df"] is not None else None
+    )
+    st.session_state.parse_metadata = {
+        "structured_parse_succeeded": parse_result["structured_parse_succeeded"],
+        "parse_mode": parse_result["parse_mode"],
+        "metadata": parse_result["metadata"],
+    }
+    schema_input = parse_result["structured_df"] if parse_result["structured_df"] is not None else parse_result["raw_df"]
+    schema_result = detect_schema_candidates(schema_input)
+    st.session_state.detected_schema = schema_result["detected_schema"]
+    st.session_state.analysis_status = parse_result["analysis_status"]
+    st.session_state.warnings = sorted(set(parse_result["warnings"] + schema_result["warnings"]))
+    st.session_state.normalized_df = None
+    st.session_state.value_display_map = {}
 
+parse_metadata = st.session_state.parse_metadata or {}
 if st.session_state.raw_df is not None:
+    if parse_metadata.get("parse_mode") == "raw_lines":
+        st.warning("Structured parsing failed. The preview below is only a raw single-column fallback.")
+
     st.subheader("Raw Preview")
     st.dataframe(st.session_state.raw_df, use_container_width=True)
 
@@ -46,6 +59,7 @@ if st.session_state.raw_df is not None:
     columns = list(st.session_state.raw_df.columns)
     none_plus_cols = [None] + columns
     numeric_default = detected.get("numeric_candidates", [])
+    wide_default = detected.get("wide_time_cols") or detected.get("replicate_cols") or numeric_default
     selected_value_cols = st.multiselect("Value columns", columns, default=numeric_default)
 
     column_mapping = {
@@ -72,48 +86,87 @@ if st.session_state.raw_df is not None:
         "value_cols": selected_value_cols,
     }
 
+    replicate_strategy = st.session_state.replicate_strategy
     if format_type in {"wide_time", "replicate"}:
         column_mapping["wide_value_cols"] = st.multiselect(
             "Wide/replicate columns",
             columns,
-            default=selected_value_cols,
+            default=[col for col in wide_default if col in columns],
         )
+    if format_type == "replicate":
+        strategy_options = ["mean", "median", "keep_long"]
+        replicate_strategy = st.selectbox(
+            "Replicate collapse strategy",
+            options=strategy_options,
+            index=strategy_options.index(st.session_state.replicate_strategy) if st.session_state.replicate_strategy in strategy_options else 0,
+        )
+    st.session_state.replicate_strategy = replicate_strategy
 
     if st.button("Confirm Mapping And Normalize", type="primary"):
         st.session_state.column_mapping = column_mapping
-        normalize_result = normalize_to_long(st.session_state.raw_df, column_mapping, format_type)
-        st.session_state.normalized_df = normalize_result["normalized_df"]
-        st.session_state.detected_schema = normalize_result["detected_schema"]
-        st.session_state.warnings = normalize_result["warnings"]
-        st.session_state.analysis_status = normalize_result["analysis_status"]
+        if parse_metadata.get("parse_mode") == "raw_lines":
+            st.session_state.normalized_df = None
+            st.session_state.analysis_status = "blocked"
+            st.session_state.value_display_map = {}
+            st.session_state.blocking_reasons = ["Normalization is blocked because structured parsing failed and only a raw single-column preview is available."]
+            st.session_state.suggested_actions = ["Fix the pasted delimiters or paste tabular data with real columns, then parse again."]
+            st.session_state.warnings = sorted(set(st.session_state.warnings + ["Structured parsing must succeed before normalization."]))
+        else:
+            normalize_result = normalize_to_long(
+                st.session_state.raw_df,
+                column_mapping,
+                format_type,
+                replicate_strategy=replicate_strategy,
+            )
+            st.session_state.detected_schema = normalize_result["detected_schema"]
+            st.session_state.warnings = normalize_result["warnings"]
+            st.session_state.blocking_reasons = normalize_result.get("blocking_reasons", [])
+            st.session_state.suggested_actions = normalize_result.get("suggested_actions", [])
+            st.session_state.analysis_status = normalize_result["analysis_status"]
+            st.session_state.value_display_map = normalize_result.get("value_display_map", {})
 
-        if st.session_state.normalized_df is not None:
-            dv_cols = [col for col in st.session_state.normalized_df.columns if col.startswith("value_")]
-            validation_result = validate_normalized_df(
-                df=st.session_state.normalized_df,
-                data_type="longitudinal"
-                if "time" in st.session_state.normalized_df.columns
-                and st.session_state.normalized_df["time"].notna().any()
-                else "cross",
-                selected_dv_cols=dv_cols,
-                between_factors=["group"],
-                factor2_col="factor2" if "factor2" in st.session_state.normalized_df.columns else None,
-            )
-            st.session_state.analysis_status = validation_result["analysis_status"]
-            st.session_state.blocking_reasons = validation_result["blocking_reasons"]
-            st.session_state.suggested_actions = validation_result["suggested_actions"]
-            st.session_state.warnings = sorted(
-                set(st.session_state.warnings + validation_result["warnings"])
-            )
+            if normalize_result["analysis_status"] == "blocked":
+                st.session_state.normalized_df = None
+            else:
+                st.session_state.normalized_df = normalize_result["normalized_df"]
+                dv_cols = [col for col in st.session_state.normalized_df.columns if col.startswith("value_")]
+                validation_result = validate_normalized_df(
+                    df=st.session_state.normalized_df,
+                    data_type="longitudinal"
+                    if "time" in st.session_state.normalized_df.columns
+                    and st.session_state.normalized_df["time"].notna().any()
+                    else "cross",
+                    selected_dv_cols=dv_cols,
+                    between_factors=["group"],
+                    factor2_col="factor2" if "factor2" in st.session_state.normalized_df.columns else None,
+                )
+                st.session_state.analysis_status = validation_result["analysis_status"]
+                st.session_state.blocking_reasons = sorted(set(st.session_state.blocking_reasons + validation_result["blocking_reasons"]))
+                st.session_state.suggested_actions = validation_result["suggested_actions"]
+                st.session_state.warnings = sorted(
+                    set(st.session_state.warnings + validation_result["warnings"])
+                )
 
 if st.session_state.normalized_df is not None:
     st.subheader("Normalized Preview")
-    st.dataframe(st.session_state.normalized_df, use_container_width=True)
+    preview_df = st.session_state.normalized_df.copy()
+    preview_labels = st.session_state.value_display_map or {}
+    preview_df = preview_df.rename(columns={col: f"{col} ({preview_labels[col]})" for col in preview_labels if col in preview_df.columns})
+    st.dataframe(preview_df, use_container_width=True)
+    if st.session_state.value_display_map:
+        st.caption(
+            "Biomarker labels: " + ", ".join(f"{key} = {value}" for key, value in st.session_state.value_display_map.items())
+        )
 
 if st.session_state.warnings:
     for warning in st.session_state.warnings:
         st.warning(warning)
 
 if st.session_state.blocking_reasons:
-    st.error("Analysis blocked")
+    st.error("Normalization or analysis setup is blocked")
     st.write(pd.DataFrame({"blocking_reasons": st.session_state.blocking_reasons}))
+
+if st.session_state.suggested_actions:
+    st.write(pd.DataFrame({"suggested_actions": st.session_state.suggested_actions}))
+
+

@@ -25,21 +25,25 @@ if not all_dv_cols:
     st.error("No numeric value columns were detected.")
     st.stop()
 
+value_display_map = st.session_state.value_display_map or {}
+
+def _label_for_dv(column: str) -> str:
+    return value_display_map.get(column, column)
+
+
 data_type = st.radio("Data type", options=["cross", "longitudinal"], horizontal=True)
 st.session_state.data_type = data_type
 
-default_dv = st.session_state.selected_dv_cols or all_dv_cols[:1]
-selected_dv_cols = st.multiselect("Biomarkers", all_dv_cols, default=default_dv)
+default_dv = [col for col in (st.session_state.selected_dv_cols or all_dv_cols[:1]) if col in all_dv_cols] or all_dv_cols[:1]
+selected_dv_cols = st.multiselect("Biomarkers", all_dv_cols, default=default_dv, format_func=_label_for_dv)
 st.session_state.selected_dv_cols = selected_dv_cols
 
 group_levels = sorted(df["group"].dropna().astype(str).unique().tolist()) if "group" in df.columns else []
-control_group = st.selectbox("Control group", options=[None] + group_levels, index=0)
-st.session_state.control_group = control_group
 
 between_factors = ["group"]
 factor2_col = None
 factor_candidates = [
-    col for col in df.columns if col not in {"subject", "group", "time"} and not col.startswith("value_")
+    col for col in df.columns if col not in {"subject", "group", "time", "replicate"} and not col.startswith("value_")
 ]
 if factor_candidates:
     factor2_col = st.selectbox("Optional factor2", options=[None] + factor_candidates, index=0)
@@ -54,6 +58,18 @@ method_override = st.selectbox(
     index=0,
 )
 st.session_state.method_override = None if method_override == "auto" else method_override
+
+control_group = None
+reference_group = None
+if data_type == "cross":
+    control_group = st.selectbox("Control group", options=[None] + group_levels, index=0)
+    st.session_state.control_group = control_group
+    st.session_state.reference_group = None
+else:
+    st.session_state.control_group = None
+    if group_levels:
+        reference_group = st.selectbox("Reference group for contrasts", options=[None] + group_levels, index=0)
+    st.session_state.reference_group = reference_group
 
 if st.button("Run Analysis", type="primary"):
     reset_analysis_state()
@@ -75,6 +91,7 @@ if st.button("Run Analysis", type="primary"):
 
     analysis_results: dict[str, dict] = {}
     figure_objects: dict[str, object] = {}
+    aggregated_blocking: list[str] = []
 
     for dv_col in selected_dv_cols:
         if data_type == "cross":
@@ -89,16 +106,34 @@ if st.button("Run Analysis", type="primary"):
                 n_per_group=validation_result["n_per_group"],
             )
             plan = build_analysis_plan(validation_result, selector_result, st.session_state.method_override)
-            result = run_cross_sectional(
-                df=df,
-                dv_col=dv_col,
-                group_col="group",
-                control_group=control_group,
-                method=plan["final_method"],
-            )
-            result["selector"] = selector_result
+            if plan["analysis_status"] == "blocked":
+                result = {
+                    "analysis_status": "blocked",
+                    "used_method": plan["final_method"],
+                    "warnings": plan.get("warnings", []),
+                    "blocking_reasons": plan.get("blocking_reasons", []),
+                    "suggested_actions": validation_result.get("suggested_actions", []),
+                    "star_map": [],
+                    "omnibus": None,
+                    "posthoc_table": None,
+                    "dv_col": dv_col,
+                    "selector": selector_result,
+                }
+            else:
+                result = run_cross_sectional(
+                    df=df,
+                    dv_col=dv_col,
+                    group_col="group",
+                    control_group=control_group,
+                    method=plan["final_method"],
+                )
+                result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
+                result["selector"] = selector_result
             analysis_results[dv_col] = result
-            figure_objects[dv_col] = make_cross_figure(df=df, result=result, config=DEFAULT_FIGURE_CONFIG)
+            if result.get("analysis_status") == "ready":
+                figure_objects[dv_col] = make_cross_figure(df=df, result=result, config=DEFAULT_FIGURE_CONFIG)
+            else:
+                aggregated_blocking.extend(result.get("blocking_reasons", []))
         else:
             assumptions = compute_longitudinal_assumptions(
                 df=df,
@@ -118,7 +153,20 @@ if st.button("Run Analysis", type="primary"):
                 n_per_group=validation_result["n_per_group"],
             )
             plan = build_analysis_plan(validation_result, selector_result, st.session_state.method_override)
-            if plan["engine"] == "statsmodels":
+            if plan["analysis_status"] == "blocked":
+                result = {
+                    "analysis_status": "blocked",
+                    "used_method": plan["final_method"],
+                    "warnings": plan.get("warnings", []),
+                    "blocking_reasons": plan.get("blocking_reasons", []),
+                    "suggested_actions": validation_result.get("suggested_actions", []),
+                    "star_map": [],
+                    "omnibus": None,
+                    "posthoc_table": None,
+                    "dv_col": dv_col,
+                    "selector": selector_result,
+                }
+            elif plan["engine"] == "statsmodels":
                 result = run_mixedlm(
                     df=df,
                     dv_col=dv_col,
@@ -127,7 +175,9 @@ if st.button("Run Analysis", type="primary"):
                     group_col="group",
                     factor2_col=factor2_col,
                     formula_mode="default",
+                    reference_group=reference_group,
                 )
+                result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
             else:
                 result = run_longitudinal(
                     df=df,
@@ -135,28 +185,36 @@ if st.button("Run Analysis", type="primary"):
                     group_col="group",
                     subject_col="subject",
                     time_col="time",
-                    control_group=control_group,
+                    control_group=None,
                     between_factors=between_factors,
                     factor2_col=factor2_col,
                     method=plan["final_method"],
                 )
+                result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
             result["selector"] = selector_result
             analysis_results[dv_col] = result
-            figure_objects[dv_col] = make_longitudinal_figure(
-                df=df, result=result, config=DEFAULT_FIGURE_CONFIG
-            )
+            if result.get("analysis_status") == "ready":
+                figure_objects[dv_col] = make_longitudinal_figure(
+                    df=df, result=result, config=DEFAULT_FIGURE_CONFIG
+                )
+            else:
+                aggregated_blocking.extend(result.get("blocking_reasons", []))
 
     st.session_state.analysis_results = analysis_results
     st.session_state.figure_objects = figure_objects
+    st.session_state.blocking_reasons = sorted(set(st.session_state.blocking_reasons + aggregated_blocking))
 
 if st.session_state.analysis_results:
     for dv_col, result in st.session_state.analysis_results.items():
-        st.subheader(dv_col)
+        st.subheader(_label_for_dv(dv_col))
+        st.caption(f"Internal column: {dv_col}")
         st.json(
             {
                 "analysis_status": result.get("analysis_status"),
-                "used_method": result.get("used_method", result.get("used_formula")),
+                "used_method": result.get("used_method"),
+                "used_formula": result.get("used_formula"),
                 "warnings": result.get("warnings", []),
+                "blocking_reasons": result.get("blocking_reasons", []),
             }
         )
         fig = st.session_state.figure_objects.get(dv_col)
