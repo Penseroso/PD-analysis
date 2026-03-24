@@ -13,24 +13,34 @@ def make_figure(
     df: pd.DataFrame,
     result: dict,
     config: dict,
+    time_order: list[str] | None = None,
 ) -> go.Figure:
     fig = go.Figure()
     dv_col = result.get("dv_col") or next((col for col in df.columns if col.startswith("value_")), None)
     if dv_col is None or dv_col not in df.columns or "time" not in df.columns:
         return fig
 
-    summary = df.groupby(["group", "time"], dropna=False)[dv_col].mean().reset_index()
+    resolved_time_order = _resolve_time_order(df, result, time_order)
+    summary = df.copy()
+    summary["time"] = pd.Categorical(summary["time"].astype(str), categories=resolved_time_order, ordered=True)
+    summary["group"] = summary["group"].astype(str)
+    summary = summary.groupby(["group", "time"], dropna=False, observed=False)[dv_col].mean().reset_index()
+    summary["time"] = summary["time"].astype(str)
+    summary = summary[summary["time"].isin(resolved_time_order)]
+
     for group_name, group_df in summary.groupby("group", dropna=False, sort=False):
+        ordered_group_df = group_df.set_index("time").reindex(resolved_time_order).dropna(subset=[dv_col]).reset_index()
         fig.add_trace(
             go.Scatter(
-                x=group_df["time"],
-                y=group_df[dv_col],
+                x=ordered_group_df["time"],
+                y=ordered_group_df[dv_col],
                 mode="lines+markers",
                 name=str(group_name),
             )
         )
 
-    _add_longitudinal_annotations(fig, summary, dv_col, result.get("star_map", []))
+    _add_longitudinal_annotations(fig, summary, dv_col, result.get("star_map", []), resolved_time_order)
+    fig.update_xaxes(categoryorder="array", categoryarray=resolved_time_order)
     fig.update_layout(template=config.get("template", "plotly_white"), title=f"Longitudinal plot: {dv_col}")
     return fig
 
@@ -41,15 +51,24 @@ def make_multi_biomarker_figure(
     results_by_dv: dict[str, dict],
     config: dict,
 ) -> go.Figure:
-    return make_figure(df=df, result=next(iter(results_by_dv.values()), {}), config=config)
+    first_result = next(iter(results_by_dv.values()), {})
+    return make_figure(df=df, result=first_result, config=config, time_order=first_result.get("time_order"))
 
 
 
-def _add_longitudinal_annotations(fig: go.Figure, summary: pd.DataFrame, dv_col: str, star_map: list[dict]) -> None:
+def _add_longitudinal_annotations(
+    fig: go.Figure,
+    summary: pd.DataFrame,
+    dv_col: str,
+    star_map: list[dict],
+    time_order: list[str],
+) -> None:
     if not star_map or summary.empty:
         return
 
     summary = summary.copy()
+    summary["time"] = pd.Categorical(summary["time"].astype(str), categories=time_order, ordered=True)
+    summary = summary.sort_values(["time", "group"], kind="stable")
     summary["time"] = summary["time"].astype(str)
     summary["group"] = summary["group"].astype(str)
     global_max = float(summary[dv_col].max()) if not summary.empty else 0.0
@@ -69,6 +88,8 @@ def _add_longitudinal_annotations(fig: go.Figure, summary: pd.DataFrame, dv_col:
             if time_value is None:
                 continue
             time_key = str(time_value)
+            if time_key not in time_order:
+                continue
             base_y = float(time_peak.get(time_key, global_max))
             next_offset = point_offsets.get(time_key, y_step)
             label = item.get("label", "*")
@@ -90,22 +111,36 @@ def _add_longitudinal_annotations(fig: go.Figure, summary: pd.DataFrame, dv_col:
                 continue
             time_a_key = str(time_a)
             time_b_key = str(time_b)
+            if time_a_key not in time_order or time_b_key not in time_order:
+                continue
+            left_key, right_key = sorted((time_a_key, time_b_key), key=lambda value: time_order.index(value))
             group_name = item.get("group")
-            pair_key = tuple(sorted((time_a_key, time_b_key))) + (str(group_name) if group_name is not None else None,)
+            pair_key = (left_key, right_key, str(group_name) if group_name is not None else None)
             base_y = max(
-                _time_pair_peak(time_group_peak, time_peak, time_a_key, time_b_key, group_name),
+                _time_pair_peak(time_group_peak, time_peak, left_key, right_key, group_name),
                 global_max,
             )
             next_offset = pair_offsets.get(pair_key, y_step)
             y = base_y + next_offset
-            fig.add_shape(type="line", x0=time_a_key, x1=time_b_key, y0=y, y1=y, line={"color": "black", "width": 1})
-            fig.add_shape(type="line", x0=time_a_key, x1=time_a_key, y0=y - y_step * 0.15, y1=y, line={"color": "black", "width": 1})
-            fig.add_shape(type="line", x0=time_b_key, x1=time_b_key, y0=y - y_step * 0.15, y1=y, line={"color": "black", "width": 1})
+            fig.add_shape(type="line", x0=left_key, x1=right_key, y0=y, y1=y, line={"color": "black", "width": 1})
+            fig.add_shape(type="line", x0=left_key, x1=left_key, y0=y - y_step * 0.15, y1=y, line={"color": "black", "width": 1})
+            fig.add_shape(type="line", x0=right_key, x1=right_key, y0=y - y_step * 0.15, y1=y, line={"color": "black", "width": 1})
             label = item.get("label", "*")
             if group_name is not None:
                 label = f"{group_name} {label}"
-            fig.add_annotation(x=time_b_key, y=y + y_step * 0.1, text=label, showarrow=False)
+            fig.add_annotation(x=right_key, y=y + y_step * 0.1, text=label, showarrow=False)
             pair_offsets[pair_key] = next_offset + y_step
+
+
+
+def _resolve_time_order(df: pd.DataFrame, result: dict, time_order: list[str] | None) -> list[str]:
+    explicit = [str(item) for item in (time_order or result.get("time_order") or []) if item is not None]
+    observed = df["time"].astype(str).dropna().drop_duplicates().tolist()
+    if explicit:
+        ordered = [item for item in explicit if item in observed]
+        leftovers = [item for item in observed if item not in ordered]
+        return ordered + leftovers
+    return observed
 
 
 

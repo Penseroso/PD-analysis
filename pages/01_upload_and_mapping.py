@@ -37,6 +37,10 @@ if st.button("Parse Input", type="primary"):
     st.session_state.warnings = sorted(set(parse_result["warnings"] + schema_result["warnings"]))
     st.session_state.normalized_df = None
     st.session_state.value_display_map = {}
+    st.session_state.time_order = []
+    st.session_state.time_order_metadata = {}
+    st.session_state.normalization_metadata = {}
+    st.session_state.replicate_preserved = False
 
 parse_metadata = st.session_state.parse_metadata or {}
 if st.session_state.raw_df is not None:
@@ -100,6 +104,10 @@ if st.session_state.raw_df is not None:
             options=strategy_options,
             index=strategy_options.index(st.session_state.replicate_strategy) if st.session_state.replicate_strategy in strategy_options else 0,
         )
+        if replicate_strategy == "keep_long":
+            st.warning(
+                "keep_long preserves technical replicate rows for exploratory preview/export only. Inferential analysis will be blocked until replicates are collapsed."
+            )
     st.session_state.replicate_strategy = replicate_strategy
 
     if st.button("Confirm Mapping And Normalize", type="primary"):
@@ -108,6 +116,10 @@ if st.session_state.raw_df is not None:
             st.session_state.normalized_df = None
             st.session_state.analysis_status = "blocked"
             st.session_state.value_display_map = {}
+            st.session_state.time_order = []
+            st.session_state.time_order_metadata = {}
+            st.session_state.normalization_metadata = {}
+            st.session_state.replicate_preserved = False
             st.session_state.blocking_reasons = ["Normalization is blocked because structured parsing failed and only a raw single-column preview is available."]
             st.session_state.suggested_actions = ["Fix the pasted delimiters or paste tabular data with real columns, then parse again."]
             st.session_state.warnings = sorted(set(st.session_state.warnings + ["Structured parsing must succeed before normalization."]))
@@ -124,6 +136,10 @@ if st.session_state.raw_df is not None:
             st.session_state.suggested_actions = normalize_result.get("suggested_actions", [])
             st.session_state.analysis_status = normalize_result["analysis_status"]
             st.session_state.value_display_map = normalize_result.get("value_display_map", {})
+            st.session_state.time_order = normalize_result.get("time_order", [])
+            st.session_state.time_order_metadata = normalize_result.get("time_order_metadata", {})
+            st.session_state.normalization_metadata = normalize_result.get("normalization_metadata", {})
+            st.session_state.replicate_preserved = normalize_result.get("replicate_preserved", False)
 
             if normalize_result["analysis_status"] == "blocked":
                 st.session_state.normalized_df = None
@@ -139,10 +155,12 @@ if st.session_state.raw_df is not None:
                     selected_dv_cols=dv_cols,
                     between_factors=["group"],
                     factor2_col="factor2" if "factor2" in st.session_state.normalized_df.columns else None,
+                    replicate_preserved=st.session_state.replicate_preserved,
+                    normalization_metadata=st.session_state.normalization_metadata,
                 )
                 st.session_state.analysis_status = validation_result["analysis_status"]
                 st.session_state.blocking_reasons = sorted(set(st.session_state.blocking_reasons + validation_result["blocking_reasons"]))
-                st.session_state.suggested_actions = validation_result["suggested_actions"]
+                st.session_state.suggested_actions = sorted(set(st.session_state.suggested_actions + validation_result["suggested_actions"]))
                 st.session_state.warnings = sorted(
                     set(st.session_state.warnings + validation_result["warnings"])
                 )
@@ -157,6 +175,15 @@ if st.session_state.normalized_df is not None:
         st.caption(
             "Biomarker labels: " + ", ".join(f"{key} = {value}" for key, value in st.session_state.value_display_map.items())
         )
+    if st.session_state.time_order:
+        st.caption("Inferred time order: " + " -> ".join(st.session_state.time_order))
+        if st.session_state.time_order_metadata.get("ambiguous"):
+            st.warning(st.session_state.time_order_metadata.get("warning", "Ambiguous time labels fell back to first-seen order."))
+    if st.session_state.replicate_preserved:
+        replicate_id_col = (st.session_state.normalization_metadata or {}).get("replicate_id_col", "replicate_id")
+        st.warning(
+            f"Technical replicates were preserved in column '{replicate_id_col}'. This normalized dataset can be previewed or exported, but inferential analysis is blocked until replicates are collapsed."
+        )
 
 if st.session_state.warnings:
     for warning in st.session_state.warnings:
@@ -168,5 +195,3 @@ if st.session_state.blocking_reasons:
 
 if st.session_state.suggested_actions:
     st.write(pd.DataFrame({"suggested_actions": st.session_state.suggested_actions}))
-
-

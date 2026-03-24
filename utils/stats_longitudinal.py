@@ -19,8 +19,9 @@ def compute_longitudinal_assumptions(
     subject_col: str,
     time_col: str,
     between_factors: list[str],
+    time_order: list[str] | None = None,
 ) -> dict:
-    clean_df = _prepare_longitudinal_df(df, dv_col, group_col, subject_col, time_col)
+    clean_df = _prepare_longitudinal_df(df, dv_col, group_col, subject_col, time_col, time_order=time_order)
     normality: dict = {}
 
     grouping_cols = [time_col]
@@ -61,8 +62,9 @@ def run_longitudinal(
     between_factors: list[str],
     factor2_col: str | None,
     method: str,
+    time_order: list[str] | None = None,
 ) -> dict:
-    clean_df = _prepare_longitudinal_df(df, dv_col, group_col, subject_col, time_col, factor2_col)
+    clean_df = _prepare_longitudinal_df(df, dv_col, group_col, subject_col, time_col, factor2_col, time_order=time_order)
     assumptions = compute_longitudinal_assumptions(
         df=clean_df,
         dv_col=dv_col,
@@ -70,6 +72,7 @@ def run_longitudinal(
         subject_col=subject_col,
         time_col=time_col,
         between_factors=between_factors,
+        time_order=time_order,
     )
     warnings: list[str] = []
     blocking_reasons: list[str] = []
@@ -105,6 +108,7 @@ def run_longitudinal(
             "blocking_reasons": blocking_reasons,
             "suggested_actions": suggested_actions,
             "dv_col": dv_col,
+            "time_order": _resolve_time_order(clean_df, time_col, time_order),
         }
 
     resolved_method = _resolve_longitudinal_method(method, assumptions, clean_df, group_col)
@@ -158,6 +162,7 @@ def run_longitudinal(
         "blocking_reasons": [],
         "suggested_actions": [],
         "dv_col": dv_col,
+        "time_order": _resolve_time_order(clean_df, time_col, time_order),
     }
 
 
@@ -169,13 +174,18 @@ def _prepare_longitudinal_df(
     subject_col: str,
     time_col: str,
     factor2_col: str | None = None,
+    time_order: list[str] | None = None,
 ) -> pd.DataFrame:
     keep_cols = [column for column in [dv_col, group_col, subject_col, time_col, factor2_col] if column and column in df.columns]
     clean_df = df[keep_cols].copy()
     clean_df[dv_col] = pd.to_numeric(clean_df[dv_col], errors="coerce")
-    for column in [group_col, subject_col, time_col, factor2_col]:
+    for column in [group_col, subject_col, factor2_col]:
         if column and column in clean_df.columns:
             clean_df[column] = clean_df[column].astype(str)
+    if time_col in clean_df.columns:
+        clean_df[time_col] = clean_df[time_col].astype(str)
+        resolved_time_order = _resolve_time_order(clean_df, time_col, time_order)
+        clean_df[time_col] = pd.Categorical(clean_df[time_col], categories=resolved_time_order, ordered=True)
     return clean_df.dropna(subset=[dv_col, subject_col, time_col])
 
 
@@ -665,6 +675,17 @@ def _infer_annotation_type(row) -> str:
 
 
 
+def _resolve_time_order(df: pd.DataFrame, time_col: str, time_order: list[str] | None) -> list[str]:
+    explicit = [str(item) for item in (time_order or []) if item is not None]
+    if explicit:
+        seen = set(df[time_col].astype(str).dropna().unique().tolist())
+        ordered = [item for item in explicit if item in seen]
+        leftovers = [item for item in df[time_col].astype(str).dropna().unique().tolist() if item not in ordered]
+        return ordered + leftovers
+    return df[time_col].astype(str).dropna().drop_duplicates().tolist()
+
+
+
 def _safe_float(value: object) -> float | None:
     if value is None:
         return None
@@ -705,4 +726,3 @@ def _pvalue_to_label(pvalue: float) -> str | None:
     if pvalue < 0.05:
         return "*"
     return None
-

@@ -28,7 +28,19 @@ TIME_HEADER_PATTERNS = [
     re.compile(r"(?i)^\d+\s*(h|hr|hrs|hour|hours)$"),
     re.compile(r"(?i)^\d+\s*(m|min|mins|minute|minutes)$"),
 ]
+BASELINE_PATTERN = re.compile(r"(?i)^(baseline|bl|pre)$")
+DAY_PATTERN = re.compile(r"(?i)^(?:d|day|t)\s*_?-?\s*(\d+(?:\.\d+)?)$")
+WEEK_PATTERN = re.compile(r"(?i)^(?:wk|week)\s*_?-?\s*(\d+(?:\.\d+)?)$")
+MONTH_PATTERN = re.compile(r"(?i)^(?:m|month)\s*_?-?\s*(\d+(?:\.\d+)?)$")
+HOUR_PATTERN = re.compile(r"(?i)^(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours)$")
+MINUTE_PATTERN = re.compile(r"(?i)^(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes)$")
+GENERIC_NUMBER_PATTERN = re.compile(r"(?i)^(\d+(?:\.\d+)?)$")
 
+
+KEEP_LONG_BLOCKING_MESSAGE = (
+    "Technical replicates were preserved with keep_long. Inferential analysis is blocked to avoid pseudo-replication."
+)
+KEEP_LONG_SUGGESTED_ACTION = "Rerun normalization with mean or median replicate collapse before running inferential analysis."
 
 
 def parse_pasted_table(raw_text: str) -> dict:
@@ -74,7 +86,6 @@ def parse_pasted_table(raw_text: str) -> dict:
         "metadata": {"attempts": attempts},
         "analysis_status": "needs_user_confirmation",
     }
-
 
 
 def detect_schema_candidates(raw_df: pd.DataFrame | None) -> dict:
@@ -135,7 +146,6 @@ def detect_schema_candidates(raw_df: pd.DataFrame | None) -> dict:
     }
 
 
-
 def infer_format_type(raw_df: pd.DataFrame) -> dict:
     result = detect_schema_candidates(raw_df)
     detected = result["detected_schema"]
@@ -150,7 +160,6 @@ def infer_format_type(raw_df: pd.DataFrame) -> dict:
         },
         "warnings": result["warnings"],
     }
-
 
 
 def normalize_to_long(
@@ -175,6 +184,10 @@ def normalize_to_long(
             "suggested_actions": ["Paste a table with real columns and parse it again."],
             "analysis_status": "blocked",
             "value_display_map": {},
+            "time_order": [],
+            "time_order_metadata": {},
+            "normalization_metadata": {},
+            "replicate_preserved": False,
         }
 
     group_col = column_mapping.get("group")
@@ -211,6 +224,10 @@ def normalize_to_long(
             "suggested_actions": suggested_actions,
             "analysis_status": "blocked",
             "value_display_map": {},
+            "time_order": [],
+            "time_order_metadata": {},
+            "normalization_metadata": {},
+            "replicate_preserved": False,
         }
 
     base = pd.DataFrame(index=raw_df.index)
@@ -224,31 +241,78 @@ def normalize_to_long(
 
     normalized_df: pd.DataFrame | None
     value_display_map: dict[str, str]
+    time_order: list[str]
+    time_order_metadata: dict
+    normalization_metadata = _base_normalization_metadata(format_type, replicate_strategy)
     if format_type == "long_single":
         normalized_df, value_display_map = _normalize_long_single(base, raw_df, value_cols)
+        time_order, time_order_metadata = [], {"method": "not_applicable", "reason": "No time variable in long_single format."}
     elif format_type == "long_time":
         normalized_df, value_display_map = _normalize_long_time(base, raw_df, time_col, value_cols)
+        time_order, time_order_metadata = infer_time_order(normalized_df["time"].tolist())
     elif format_type == "wide_time":
         normalized_df, value_display_map = _normalize_wide_time(base, raw_df, wide_value_cols)
+        time_order, time_order_metadata = infer_time_order(wide_value_cols)
     elif format_type == "replicate":
-        normalized_df, value_display_map = _normalize_replicates(base, raw_df, wide_value_cols, replicate_strategy)
+        normalized_df, value_display_map, replicate_metadata = _normalize_replicates(base, raw_df, wide_value_cols, replicate_strategy)
+        normalization_metadata.update(replicate_metadata)
+        time_order, time_order_metadata = [], {"method": "not_applicable", "reason": "Replicate normalization does not create a longitudinal time axis."}
     else:
         normalized_df = None
         value_display_map = {}
+        time_order, time_order_metadata = [], {}
         warnings.append("Format type is not supported.")
 
     analysis_status = "ready" if normalized_df is not None else "blocked"
+    if time_order_metadata.get("warning"):
+        warnings.append(time_order_metadata["warning"])
+    if normalization_metadata.get("replicate_preserved"):
+        warnings.append(KEEP_LONG_BLOCKING_MESSAGE)
+        suggested_actions.append(KEEP_LONG_SUGGESTED_ACTION)
     return {
         "normalized_df": normalized_df,
         "detected_schema": detected_schema,
         "confidence": schema_result["confidence"],
-        "warnings": warnings,
+        "warnings": sorted(set(warnings)),
         "blocking_reasons": blocking_reasons,
-        "suggested_actions": suggested_actions,
+        "suggested_actions": sorted(set(suggested_actions)),
         "analysis_status": analysis_status,
         "value_display_map": value_display_map,
+        "time_order": time_order,
+        "time_order_metadata": time_order_metadata,
+        "normalization_metadata": normalization_metadata,
+        "replicate_preserved": bool(normalization_metadata.get("replicate_preserved", False)),
     }
 
+
+def infer_time_order(time_labels: list[object]) -> tuple[list[str], dict]:
+    first_seen = _first_seen_strings(time_labels)
+    if not first_seen:
+        return [], {"method": "empty", "reason": "No non-null time labels were available."}
+
+    parsed = [_parse_time_label(label, index) for index, label in enumerate(first_seen)]
+    unparsable = [item["label"] for item in parsed if item["family"] == "unknown"]
+    non_baseline_families = {item["family"] for item in parsed if item["family"] not in {"baseline"}}
+
+    if not unparsable and len(non_baseline_families) <= 1:
+        ordered = [item["label"] for item in sorted(parsed, key=lambda item: (item["sort_rank"], item["value"], item["first_seen_index"]))]
+        family = next(iter(non_baseline_families), "baseline")
+        return ordered, {
+            "method": "numeric_aware",
+            "family": family,
+            "reason": f"Used parsed {family} ordering with baseline/pre labels first when present.",
+            "ambiguous": False,
+        }
+
+    warning = "Time labels were ambiguous, so first-seen order was preserved instead of lexical sorting."
+    return first_seen, {
+        "method": "first_seen",
+        "reason": "Mixed or non-parsable time labels prevented reliable numeric-aware ordering.",
+        "ambiguous": True,
+        "unparsable_labels": unparsable,
+        "families_seen": sorted(non_baseline_families),
+        "warning": warning,
+    }
 
 
 def _normalize_long_single(base: pd.DataFrame, raw_df: pd.DataFrame, value_cols: list[str]) -> tuple[pd.DataFrame, dict[str, str]]:
@@ -262,7 +326,6 @@ def _normalize_long_single(base: pd.DataFrame, raw_df: pd.DataFrame, value_cols:
     return normalized_df, value_display_map
 
 
-
 def _normalize_long_time(base: pd.DataFrame, raw_df: pd.DataFrame, time_col: str, value_cols: list[str]) -> tuple[pd.DataFrame, dict[str, str]]:
     normalized_df = base.copy()
     normalized_df["time"] = raw_df[time_col].astype(str)
@@ -274,7 +337,6 @@ def _normalize_long_time(base: pd.DataFrame, raw_df: pd.DataFrame, time_col: str
     return normalized_df, value_display_map
 
 
-
 def _normalize_wide_time(base: pd.DataFrame, raw_df: pd.DataFrame, wide_value_cols: list[str]) -> tuple[pd.DataFrame, dict[str, str]]:
     wide = base[["group", "subject", "factor2"]].copy()
     for col in wide_value_cols:
@@ -283,13 +345,12 @@ def _normalize_wide_time(base: pd.DataFrame, raw_df: pd.DataFrame, wide_value_co
     return normalized_df, {"value_1": "Wide-format value"}
 
 
-
 def _normalize_replicates(
     base: pd.DataFrame,
     raw_df: pd.DataFrame,
     wide_value_cols: list[str],
     replicate_strategy: str,
-) -> tuple[pd.DataFrame, dict[str, str]]:
+) -> tuple[pd.DataFrame, dict[str, str], dict]:
     replicate_frame = raw_df[list(wide_value_cols)].apply(pd.to_numeric, errors="coerce")
     if replicate_strategy == "keep_long":
         long_df = base.copy()
@@ -299,17 +360,28 @@ def _normalize_replicates(
         normalized_df = long_df.melt(
             id_vars=["group", "subject", "factor2", "time"],
             value_vars=wide_value_cols,
-            var_name="replicate",
+            var_name="replicate_id",
             value_name="value_1",
         )
-        return normalized_df, {"value_1": "Replicate value"}
+        return normalized_df, {"value_1": "Replicate value"}, {
+            "replicate_preserved": True,
+            "replicate_strategy": "keep_long",
+            "replicate_id_col": "replicate_id",
+            "inferential_analysis_supported": False,
+            "policy": "blocked_inferential",
+        }
 
     collapsed = replicate_frame.mean(axis=1) if replicate_strategy == "mean" else replicate_frame.median(axis=1)
     normalized_df = base.copy()
     normalized_df["time"] = pd.NA
     normalized_df["value_1"] = collapsed
-    return normalized_df, {"value_1": f"Replicates ({replicate_strategy})"}
-
+    return normalized_df, {"value_1": f"Replicates ({replicate_strategy})"}, {
+        "replicate_preserved": False,
+        "replicate_strategy": replicate_strategy,
+        "replicate_id_col": None,
+        "inferential_analysis_supported": True,
+        "policy": "collapsed_before_analysis",
+    }
 
 
 def _validate_required_mappings(
@@ -352,10 +424,19 @@ def _validate_required_mappings(
     return reasons
 
 
+def _base_normalization_metadata(format_type: str, replicate_strategy: str) -> dict:
+    return {
+        "format_type": format_type,
+        "replicate_strategy": replicate_strategy,
+        "replicate_preserved": False,
+        "replicate_id_col": None,
+        "inferential_analysis_supported": True,
+        "policy": "standard",
+    }
+
 
 def _as_existing_columns(raw_df: pd.DataFrame, columns: list[str]) -> list[str]:
     return [column for column in columns if column in raw_df.columns]
-
 
 
 def _pick_first(columns: list[str], patterns: list[str]) -> str | None:
@@ -366,11 +447,9 @@ def _pick_first(columns: list[str], patterns: list[str]) -> str | None:
     return None
 
 
-
 def _numeric_success_rate(series: pd.Series) -> float:
     coerced = pd.to_numeric(series, errors="coerce")
     return float(coerced.notna().mean())
-
 
 
 def _looks_wide_time(columns: list[str]) -> bool:
@@ -378,10 +457,72 @@ def _looks_wide_time(columns: list[str]) -> bool:
     return len(time_like) >= 2
 
 
-
 def _is_time_like_header(value: object) -> bool:
     label = str(value).strip()
     if not label:
         return False
-    normalized = re.sub(r"\s+", " ", label.replace("_", " ").replace("-", " ")).strip()
+    normalized = _normalize_time_token(label)
     return any(pattern.match(normalized) for pattern in TIME_HEADER_PATTERNS)
+
+
+def _first_seen_strings(values: list[object]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value is None or pd.isna(value):
+            continue
+        label = str(value).strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        ordered.append(label)
+    return ordered
+
+
+def _parse_time_label(label: str, first_seen_index: int) -> dict:
+    normalized = _normalize_time_token(label)
+    family = "unknown"
+    sort_rank = 99
+    value = float("inf")
+
+    if BASELINE_PATTERN.match(normalized):
+        family = "baseline"
+        sort_rank = 0
+        value = 0.0
+    elif match := HOUR_PATTERN.match(normalized):
+        family = "hour"
+        sort_rank = 1
+        value = float(match.group(1))
+    elif match := MINUTE_PATTERN.match(normalized):
+        family = "minute"
+        sort_rank = 1
+        value = float(match.group(1))
+    elif match := DAY_PATTERN.match(normalized):
+        family = "day"
+        sort_rank = 1
+        value = float(match.group(1))
+    elif match := WEEK_PATTERN.match(normalized):
+        family = "week"
+        sort_rank = 1
+        value = float(match.group(1))
+    elif match := MONTH_PATTERN.match(normalized):
+        family = "month"
+        sort_rank = 1
+        value = float(match.group(1))
+    elif match := GENERIC_NUMBER_PATTERN.match(normalized):
+        family = "numeric"
+        sort_rank = 1
+        value = float(match.group(1))
+
+    return {
+        "label": label,
+        "normalized": normalized,
+        "family": family,
+        "sort_rank": sort_rank,
+        "value": value,
+        "first_seen_index": first_seen_index,
+    }
+
+
+def _normalize_time_token(label: str) -> str:
+    return re.sub(r"\s+", " ", str(label).strip().replace("_", " ").replace("-", " ")).strip().lower()

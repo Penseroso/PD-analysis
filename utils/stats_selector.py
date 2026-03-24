@@ -34,6 +34,17 @@ LONGITUDINAL_METHOD_RULES = {
 }
 
 
+KEEP_LONG_BLOCKING_REASON = (
+    "Inferential analysis is blocked because technical replicates were preserved with keep_long and no explicit replicate model is implemented."
+)
+KEEP_LONG_SUGGESTED_ACTION = "Rerun normalization with mean or median replicate collapse before running inferential analysis."
+REPEATED_STRUCTURE_BLOCKING_REASON = (
+    "Cross-sectional inferential analysis is blocked because the normalized dataset contains repeated-measures structure (subject plus time)."
+)
+REPEATED_STRUCTURE_SUGGESTED_ACTION = "Switch Data type to longitudinal before running inferential analysis."
+
+
+
 def select_method(
     data_type: str,
     normality: dict,
@@ -132,6 +143,43 @@ def build_analysis_plan(
             "rationale": rationale,
             "warnings": warnings,
             "blocking_reasons": validation_result.get("blocking_reasons", []),
+            "suggested_actions": validation_result.get("suggested_actions", []),
+            "selector_method": selector_result.get("recommended_method"),
+        }
+
+    if validation_result.get("repeated_structure_info", {}).get("detected") and validation_result.get("data_type") == "cross":
+        blocking_reasons = list(validation_result.get("blocking_reasons", []))
+        suggested_actions = list(validation_result.get("suggested_actions", []))
+        if REPEATED_STRUCTURE_BLOCKING_REASON not in blocking_reasons:
+            blocking_reasons.append(REPEATED_STRUCTURE_BLOCKING_REASON)
+        if REPEATED_STRUCTURE_SUGGESTED_ACTION not in suggested_actions:
+            suggested_actions.append(REPEATED_STRUCTURE_SUGGESTED_ACTION)
+        return {
+            "final_method": method_override or selector_result.get("recommended_method"),
+            "engine": METHOD_TO_ENGINE.get(method_override or selector_result.get("recommended_method"), "none"),
+            "analysis_status": "blocked",
+            "rationale": rationale,
+            "warnings": sorted(set(warnings)),
+            "blocking_reasons": sorted(set(blocking_reasons)),
+            "suggested_actions": sorted(set(suggested_actions)),
+            "selector_method": selector_result.get("recommended_method"),
+        }
+
+    if validation_result.get("replicate_preserved"):
+        blocking_reasons = list(validation_result.get("blocking_reasons", []))
+        suggested_actions = list(validation_result.get("suggested_actions", []))
+        if KEEP_LONG_BLOCKING_REASON not in blocking_reasons:
+            blocking_reasons.append(KEEP_LONG_BLOCKING_REASON)
+        if KEEP_LONG_SUGGESTED_ACTION not in suggested_actions:
+            suggested_actions.append(KEEP_LONG_SUGGESTED_ACTION)
+        return {
+            "final_method": method_override or selector_result.get("recommended_method"),
+            "engine": METHOD_TO_ENGINE.get(method_override or selector_result.get("recommended_method"), "none"),
+            "analysis_status": "blocked",
+            "rationale": rationale,
+            "warnings": sorted(set(warnings)),
+            "blocking_reasons": sorted(set(blocking_reasons)),
+            "suggested_actions": sorted(set(suggested_actions)),
             "selector_method": selector_result.get("recommended_method"),
         }
 
@@ -148,6 +196,7 @@ def build_analysis_plan(
             "rationale": rationale,
             "warnings": warnings,
             "blocking_reasons": blocking_reasons,
+            "suggested_actions": validation_result.get("suggested_actions", []),
             "selector_method": selector_result.get("recommended_method"),
         }
 
@@ -163,6 +212,7 @@ def build_analysis_plan(
         "rationale": rationale,
         "warnings": sorted(set(warnings)),
         "blocking_reasons": [],
+        "suggested_actions": validation_result.get("suggested_actions", []),
         "selector_method": selector_result.get("recommended_method"),
     }
 

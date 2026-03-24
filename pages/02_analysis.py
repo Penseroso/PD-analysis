@@ -8,9 +8,18 @@ from utils.stats_cross import compute_cross_assumptions, run_cross_sectional
 from utils.stats_longitudinal import compute_longitudinal_assumptions, run_longitudinal
 from utils.stats_mixedlm import run_mixedlm
 from utils.stats_selector import build_analysis_plan, select_method
-from utils.validators import validate_normalized_df
+from utils.validators import detect_repeated_structure, validate_normalized_df
 from utils.viz_cross import make_figure as make_cross_figure
 from utils.viz_longitudinal import make_figure as make_longitudinal_figure
+
+
+KEEP_LONG_BLOCKING_REASON = (
+    "Inferential analysis is blocked because technical replicates were preserved with keep_long and the app does not model replicate structure explicitly."
+)
+KEEP_LONG_SUGGESTED_ACTION = "Rerun normalization with mean or median replicate collapse before running inferential analysis."
+REPEATED_STRUCTURE_BLOCKING_REASON = (
+    "Cross-sectional inferential analysis is blocked because the normalized dataset contains repeated-measures structure (subject plus time)."
+)
 
 
 st.title("Analysis")
@@ -26,24 +35,54 @@ if not all_dv_cols:
     st.stop()
 
 value_display_map = st.session_state.value_display_map or {}
+time_order = st.session_state.time_order or []
+time_order_metadata = st.session_state.time_order_metadata or {}
+normalization_metadata = st.session_state.normalization_metadata or {}
+replicate_preserved = bool(st.session_state.replicate_preserved)
+repeated_structure_info = detect_repeated_structure(df)
+
 
 def _label_for_dv(column: str) -> str:
     return value_display_map.get(column, column)
 
 
-data_type = st.radio("Data type", options=["cross", "longitudinal"], horizontal=True)
+preferred_data_type = "longitudinal" if repeated_structure_info.get("detected") else "cross"
+current_data_type = st.session_state.data_type if st.session_state.data_type in {"cross", "longitudinal"} else preferred_data_type
+data_type = st.radio(
+    "Data type",
+    options=["cross", "longitudinal"],
+    horizontal=True,
+    index=0 if current_data_type == "cross" else 1,
+)
 st.session_state.data_type = data_type
 
 default_dv = [col for col in (st.session_state.selected_dv_cols or all_dv_cols[:1]) if col in all_dv_cols] or all_dv_cols[:1]
 selected_dv_cols = st.multiselect("Biomarkers", all_dv_cols, default=default_dv, format_func=_label_for_dv)
 st.session_state.selected_dv_cols = selected_dv_cols
 
+if repeated_structure_info.get("detected"):
+    st.info("Detected repeated-measures structure; longitudinal analysis is recommended.")
+    if data_type == "cross":
+        st.warning(REPEATED_STRUCTURE_BLOCKING_REASON)
+
+if data_type == "longitudinal" and time_order:
+    st.caption("Time order: " + " -> ".join(time_order))
+    if time_order_metadata.get("ambiguous"):
+        st.warning(time_order_metadata.get("warning", "Ambiguous time labels fell back to first-seen order."))
+
+if replicate_preserved:
+    replicate_id_col = normalization_metadata.get("replicate_id_col", "replicate_id")
+    st.error(KEEP_LONG_BLOCKING_REASON)
+    st.caption(
+        f"Preserved replicate column: {replicate_id_col}. Exploratory preview/export is available, but inferential tests are disabled for this normalized dataset."
+    )
+
 group_levels = sorted(df["group"].dropna().astype(str).unique().tolist()) if "group" in df.columns else []
 
 between_factors = ["group"]
 factor2_col = None
 factor_candidates = [
-    col for col in df.columns if col not in {"subject", "group", "time", "replicate"} and not col.startswith("value_")
+    col for col in df.columns if col not in {"subject", "group", "time", "replicate", "replicate_id"} and not col.startswith("value_")
 ]
 if factor_candidates:
     factor2_col = st.selectbox("Optional factor2", options=[None] + factor_candidates, index=0)
@@ -59,6 +98,41 @@ method_override = st.selectbox(
 )
 st.session_state.method_override = None if method_override == "auto" else method_override
 
+preview_validation = validate_normalized_df(
+    df=df,
+    data_type=data_type,
+    selected_dv_cols=selected_dv_cols,
+    between_factors=between_factors,
+    factor2_col=factor2_col,
+    control_group=None,
+    replicate_preserved=replicate_preserved,
+    normalization_metadata=normalization_metadata,
+)
+preview_effective_method = st.session_state.method_override
+if data_type == "longitudinal" and selected_dv_cols:
+    preview_dv = selected_dv_cols[0]
+    preview_assumptions = compute_longitudinal_assumptions(
+        df=df,
+        dv_col=preview_dv,
+        group_col="group",
+        subject_col="subject",
+        time_col="time",
+        between_factors=between_factors,
+        time_order=time_order,
+    )
+    preview_selector = select_method(
+        data_type=data_type,
+        normality=preview_assumptions.get("normality", {}),
+        sphericity=preview_assumptions.get("sphericity"),
+        levene={},
+        balance_info=preview_validation["balance_info"],
+        between_factors=between_factors,
+        n_per_group=preview_validation["n_per_group"],
+    )
+    preview_effective_method = st.session_state.method_override or preview_selector["recommended_method"]
+else:
+    preview_selector = None
+
 control_group = None
 reference_group = None
 if data_type == "cross":
@@ -67,7 +141,7 @@ if data_type == "cross":
     st.session_state.reference_group = None
 else:
     st.session_state.control_group = None
-    if group_levels:
+    if group_levels and preview_effective_method == "mixedlm":
         reference_group = st.selectbox("Reference group for contrasts", options=[None] + group_levels, index=0)
     st.session_state.reference_group = reference_group
 
@@ -80,6 +154,8 @@ if st.button("Run Analysis", type="primary"):
         between_factors=between_factors,
         factor2_col=factor2_col,
         control_group=control_group,
+        replicate_preserved=replicate_preserved,
+        normalization_metadata=normalization_metadata,
     )
     st.session_state.analysis_status = validation_result["analysis_status"]
     st.session_state.blocking_reasons = validation_result["blocking_reasons"]
@@ -87,6 +163,9 @@ if st.button("Run Analysis", type="primary"):
     st.session_state.warnings = validation_result["warnings"]
 
     if validation_result["analysis_status"] == "blocked":
+        if replicate_preserved:
+            st.session_state.blocking_reasons = sorted(set(st.session_state.blocking_reasons + [KEEP_LONG_BLOCKING_REASON]))
+            st.session_state.suggested_actions = sorted(set(st.session_state.suggested_actions + [KEEP_LONG_SUGGESTED_ACTION]))
         st.rerun()
 
     analysis_results: dict[str, dict] = {}
@@ -112,7 +191,7 @@ if st.button("Run Analysis", type="primary"):
                     "used_method": plan["final_method"],
                     "warnings": plan.get("warnings", []),
                     "blocking_reasons": plan.get("blocking_reasons", []),
-                    "suggested_actions": validation_result.get("suggested_actions", []),
+                    "suggested_actions": plan.get("suggested_actions", validation_result.get("suggested_actions", [])),
                     "star_map": [],
                     "omnibus": None,
                     "posthoc_table": None,
@@ -142,6 +221,7 @@ if st.button("Run Analysis", type="primary"):
                 subject_col="subject",
                 time_col="time",
                 between_factors=between_factors,
+                time_order=time_order,
             )
             selector_result = select_method(
                 data_type=data_type,
@@ -159,12 +239,13 @@ if st.button("Run Analysis", type="primary"):
                     "used_method": plan["final_method"],
                     "warnings": plan.get("warnings", []),
                     "blocking_reasons": plan.get("blocking_reasons", []),
-                    "suggested_actions": validation_result.get("suggested_actions", []),
+                    "suggested_actions": plan.get("suggested_actions", validation_result.get("suggested_actions", [])),
                     "star_map": [],
                     "omnibus": None,
                     "posthoc_table": None,
                     "dv_col": dv_col,
                     "selector": selector_result,
+                    "time_order": time_order,
                 }
             elif plan["engine"] == "statsmodels":
                 result = run_mixedlm(
@@ -176,6 +257,7 @@ if st.button("Run Analysis", type="primary"):
                     factor2_col=factor2_col,
                     formula_mode="default",
                     reference_group=reference_group,
+                    time_order=time_order,
                 )
                 result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
             else:
@@ -189,13 +271,15 @@ if st.button("Run Analysis", type="primary"):
                     between_factors=between_factors,
                     factor2_col=factor2_col,
                     method=plan["final_method"],
+                    time_order=time_order,
                 )
                 result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
             result["selector"] = selector_result
+            result["time_order"] = time_order
             analysis_results[dv_col] = result
             if result.get("analysis_status") == "ready":
                 figure_objects[dv_col] = make_longitudinal_figure(
-                    df=df, result=result, config=DEFAULT_FIGURE_CONFIG
+                    df=df, result=result, config=DEFAULT_FIGURE_CONFIG, time_order=time_order
                 )
             else:
                 aggregated_blocking.extend(result.get("blocking_reasons", []))
@@ -213,6 +297,7 @@ if st.session_state.analysis_results:
                 "analysis_status": result.get("analysis_status"),
                 "used_method": result.get("used_method"),
                 "used_formula": result.get("used_formula"),
+                "time_order": result.get("time_order", []),
                 "warnings": result.get("warnings", []),
                 "blocking_reasons": result.get("blocking_reasons", []),
             }
@@ -224,3 +309,7 @@ if st.session_state.analysis_results:
 if st.session_state.blocking_reasons:
     for reason in st.session_state.blocking_reasons:
         st.error(reason)
+
+if st.session_state.suggested_actions:
+    for action in st.session_state.suggested_actions:
+        st.info(action)

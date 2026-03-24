@@ -9,6 +9,7 @@ import statsmodels.formula.api as smf
 ANNOTATION_TYPE = "mixedlm_reference_contrast"
 
 
+
 def build_mixedlm_formula(
     dv_col: str,
     time_col: str,
@@ -31,6 +32,7 @@ def run_mixedlm(
     factor2_col: str | None,
     formula_mode: str,
     reference_group: str | None = None,
+    time_order: list[str] | None = None,
 ) -> dict:
     warnings: list[str] = []
     blocking_reasons: list[str] = []
@@ -60,9 +62,10 @@ def run_mixedlm(
             "blocking_reasons": blocking_reasons,
             "suggested_actions": suggested_actions,
             "dv_col": dv_col,
+            "time_order": _resolve_time_order(df, time_col, time_order),
         }
 
-    fit_df = _prepare_mixedlm_df(df, dv_col, subject_col, time_col, group_col, factor2_col)
+    fit_df = _prepare_mixedlm_df(df, dv_col, subject_col, time_col, group_col, factor2_col, time_order=time_order)
     if fit_df.empty:
         return {
             "analysis_status": "blocked",
@@ -78,6 +81,7 @@ def run_mixedlm(
             "blocking_reasons": ["No complete observations are available for MixedLM fitting."],
             "suggested_actions": ["Check missing values and verify the selected biomarker."],
             "dv_col": dv_col,
+            "time_order": _resolve_time_order(df, time_col, time_order),
         }
 
     used_formula = build_mixedlm_formula(dv_col, time_col, group_col, factor2_col, formula_mode)
@@ -99,6 +103,7 @@ def run_mixedlm(
             "blocking_reasons": [f"MixedLM fitting failed: {exc}"],
             "suggested_actions": ["Inspect missingness, small cell sizes, or simplify the design."],
             "dv_col": dv_col,
+            "time_order": _resolve_time_order(df, time_col, time_order),
         }
 
     if not bool(getattr(result, "converged", False)):
@@ -132,6 +137,7 @@ def run_mixedlm(
         "blocking_reasons": [],
         "suggested_actions": [],
         "dv_col": dv_col,
+        "time_order": _resolve_time_order(fit_df, time_col, time_order),
     }
 
 
@@ -143,6 +149,7 @@ def _prepare_mixedlm_df(
     time_col: str,
     group_col: str,
     factor2_col: str | None,
+    time_order: list[str] | None = None,
 ) -> pd.DataFrame:
     keep_cols = [column for column in [dv_col, subject_col, time_col, group_col, factor2_col] if column and column in df.columns]
     fit_df = df[keep_cols].copy()
@@ -150,12 +157,13 @@ def _prepare_mixedlm_df(
     fit_df = fit_df.dropna(subset=[dv_col, subject_col, time_col, group_col])
 
     fit_df[subject_col] = fit_df[subject_col].astype(str)
-    fit_df[time_col] = pd.Categorical(fit_df[time_col].astype(str), categories=sorted(fit_df[time_col].astype(str).unique()), ordered=True)
-    fit_df[group_col] = pd.Categorical(fit_df[group_col].astype(str), categories=sorted(fit_df[group_col].astype(str).unique()), ordered=True)
+    resolved_time_order = _resolve_time_order(fit_df, time_col, time_order)
+    fit_df[time_col] = pd.Categorical(fit_df[time_col].astype(str), categories=resolved_time_order, ordered=True)
+    fit_df[group_col] = pd.Categorical(fit_df[group_col].astype(str), categories=fit_df[group_col].astype(str).drop_duplicates().tolist(), ordered=True)
     if factor2_col and factor2_col in fit_df.columns:
         fit_df[factor2_col] = pd.Categorical(
             fit_df[factor2_col].astype(str),
-            categories=sorted(fit_df[factor2_col].astype(str).unique()),
+            categories=fit_df[factor2_col].astype(str).drop_duplicates().tolist(),
             ordered=True,
         )
     return fit_df
@@ -214,11 +222,11 @@ def _build_contrast_table(
     reference_group: str | None,
 ) -> tuple[pd.DataFrame, list[str], str | None]:
     warnings: list[str] = []
-    group_levels = fit_df[group_col].cat.categories.tolist() if hasattr(fit_df[group_col], "cat") else sorted(fit_df[group_col].astype(str).unique())
-    time_levels = fit_df[time_col].cat.categories.tolist() if hasattr(fit_df[time_col], "cat") else sorted(fit_df[time_col].astype(str).unique())
+    group_levels = fit_df[group_col].cat.categories.tolist() if hasattr(fit_df[group_col], "cat") else fit_df[group_col].astype(str).drop_duplicates().tolist()
+    time_levels = fit_df[time_col].cat.categories.tolist() if hasattr(fit_df[time_col], "cat") else fit_df[time_col].astype(str).drop_duplicates().tolist()
     factor2_levels = [None]
     if factor2_col and factor2_col in fit_df.columns:
-        factor2_levels = fit_df[factor2_col].cat.categories.tolist() if hasattr(fit_df[factor2_col], "cat") else sorted(fit_df[factor2_col].astype(str).unique())
+        factor2_levels = fit_df[factor2_col].cat.categories.tolist() if hasattr(fit_df[factor2_col], "cat") else fit_df[factor2_col].astype(str).drop_duplicates().tolist()
 
     if len(group_levels) < 2:
         return pd.DataFrame(columns=["contrast", "estimate", "se", "ci_low", "ci_high", "pvalue"]), warnings, None
@@ -307,6 +315,17 @@ def _build_star_map(contrast_table: pd.DataFrame | None) -> list[dict]:
             record["reference_group"] = getattr(row, "reference_group")
         star_map.append(record)
     return star_map
+
+
+
+def _resolve_time_order(df: pd.DataFrame, time_col: str, time_order: list[str] | None) -> list[str]:
+    explicit = [str(item) for item in (time_order or []) if item is not None]
+    observed = df[time_col].astype(str).dropna().drop_duplicates().tolist() if time_col in df.columns else []
+    if explicit:
+        ordered = [item for item in explicit if item in observed]
+        leftovers = [item for item in observed if item not in ordered]
+        return ordered + leftovers
+    return observed
 
 
 

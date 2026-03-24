@@ -3,6 +3,85 @@ from __future__ import annotations
 import pandas as pd
 
 
+KEEP_LONG_BLOCKING_MESSAGE = (
+    "Technical replicates are preserved in long form. They are not valid independent inferential units in the current app."
+)
+KEEP_LONG_BLOCKING_REASON = (
+    "Inferential analysis is blocked because technical replicates were preserved with keep_long and the app does not model replicate structure explicitly."
+)
+KEEP_LONG_SUGGESTED_ACTION = "Rerun normalization with mean or median replicate collapse before running inferential analysis."
+REPEATED_STRUCTURE_RECOMMENDATION = "Detected repeated-measures structure; longitudinal analysis is recommended."
+REPEATED_STRUCTURE_BLOCKING_REASON = (
+    "Cross-sectional inferential analysis is blocked because the normalized dataset contains repeated-measures structure (subject plus time)."
+)
+REPEATED_STRUCTURE_SUGGESTED_ACTION = "Switch Data type to longitudinal before running inferential analysis."
+
+
+
+def detect_repeated_structure(
+    df: pd.DataFrame,
+    subject_col: str = "subject",
+    time_col: str = "time",
+) -> dict:
+    if df is None or df.empty:
+        return {
+            "detected": False,
+            "has_subject_column": False,
+            "has_time_column": False,
+            "n_time_levels": 0,
+            "n_subjects_with_multiple_timepoints": 0,
+            "recommended_data_type": "cross",
+            "reason": "No normalized data is available.",
+        }
+
+    has_subject_column = subject_col in df.columns and df[subject_col].notna().any()
+    has_time_column = time_col in df.columns and df[time_col].notna().any()
+    if not has_subject_column or not has_time_column:
+        return {
+            "detected": False,
+            "has_subject_column": has_subject_column,
+            "has_time_column": has_time_column,
+            "n_time_levels": 0,
+            "n_subjects_with_multiple_timepoints": 0,
+            "recommended_data_type": "cross",
+            "reason": "Repeated-measures structure requires both subject and time columns.",
+        }
+
+    working_df = df[[subject_col, time_col]].dropna().copy()
+    if working_df.empty:
+        return {
+            "detected": False,
+            "has_subject_column": has_subject_column,
+            "has_time_column": has_time_column,
+            "n_time_levels": 0,
+            "n_subjects_with_multiple_timepoints": 0,
+            "recommended_data_type": "cross",
+            "reason": "Subject/time columns are present but contain no analyzable repeated rows.",
+        }
+
+    working_df[subject_col] = working_df[subject_col].astype(str)
+    working_df[time_col] = working_df[time_col].astype(str)
+    n_time_levels = int(working_df[time_col].nunique(dropna=True))
+    time_levels_per_subject = working_df.groupby(subject_col, sort=False)[time_col].nunique(dropna=True)
+    n_subjects_with_multiple_timepoints = int((time_levels_per_subject >= 2).sum())
+    detected = n_time_levels >= 2 and n_subjects_with_multiple_timepoints >= 1
+    reason = (
+        "Subject and time columns with repeated observations across at least two time levels were detected."
+        if detected
+        else "Subject/time columns are present, but repeated observations across multiple time levels were not clearly detected."
+    )
+    return {
+        "detected": detected,
+        "has_subject_column": has_subject_column,
+        "has_time_column": has_time_column,
+        "n_time_levels": n_time_levels,
+        "n_subjects_with_multiple_timepoints": n_subjects_with_multiple_timepoints,
+        "recommended_data_type": "longitudinal" if detected else "cross",
+        "reason": reason,
+    }
+
+
+
 def validate_normalized_df(
     df: pd.DataFrame,
     data_type: str,
@@ -13,10 +92,13 @@ def validate_normalized_df(
     time_col: str = "time",
     factor2_col: str | None = None,
     control_group: str | None = None,
+    replicate_preserved: bool = False,
+    normalization_metadata: dict | None = None,
 ) -> dict:
     warnings: list[str] = []
     blocking_reasons: list[str] = []
     suggested_actions: list[str] = []
+    normalization_metadata = normalization_metadata or {}
 
     if df is None or df.empty:
         blocking_reasons.append("No normalized data is available.")
@@ -25,6 +107,13 @@ def validate_normalized_df(
     if not selected_dv_cols:
         blocking_reasons.append("No biomarker columns were selected.")
         suggested_actions.append("Select at least one value column in Analysis.")
+
+    repeated_structure_info = detect_repeated_structure(df=df, subject_col=subject_col, time_col=time_col)
+    if repeated_structure_info["detected"]:
+        warnings.append(REPEATED_STRUCTURE_RECOMMENDATION)
+        if data_type == "cross":
+            blocking_reasons.append(REPEATED_STRUCTURE_BLOCKING_REASON)
+            suggested_actions.append(REPEATED_STRUCTURE_SUGGESTED_ACTION)
 
     if group_col not in df.columns:
         blocking_reasons.append("The normalized dataset does not contain a group column.")
@@ -58,6 +147,16 @@ def validate_normalized_df(
     n_per_group = _count_observations_per_group(df, group_col, selected_dv_cols)
     subject_counts_per_group = balance_info.get("n_subjects_per_group", {})
 
+    if replicate_preserved:
+        warnings.append(KEEP_LONG_BLOCKING_MESSAGE)
+        blocking_reasons.append(KEEP_LONG_BLOCKING_REASON)
+        suggested_actions.append(KEEP_LONG_SUGGESTED_ACTION)
+        replicate_id_col = normalization_metadata.get("replicate_id_col")
+        if replicate_id_col and replicate_id_col in df.columns:
+            warnings.append(
+                f"Replicate identifier column '{replicate_id_col}' is present for exploratory preview/export, but replicate rows are not modeled as nested or repeated technical measurements."
+            )
+
     if data_type == "longitudinal":
         if subject_counts_per_group and any(count < 2 for count in subject_counts_per_group.values()):
             warnings.append("Some groups have fewer than 2 unique subjects, which may block repeated-measures inference.")
@@ -76,8 +175,8 @@ def validate_normalized_df(
     return {
         "analysis_status": analysis_status,
         "warnings": sorted(set(warnings)),
-        "blocking_reasons": blocking_reasons,
-        "suggested_actions": suggested_actions,
+        "blocking_reasons": sorted(set(blocking_reasons)),
+        "suggested_actions": sorted(set(suggested_actions)),
         "balance_info": balance_info,
         "missingness_info": balance_info.get("missingness_info", {}),
         "n_per_group": n_per_group,
@@ -85,6 +184,10 @@ def validate_normalized_df(
         "between_factors": between_factors,
         "factor2_col": factor2_col,
         "control_group": control_group,
+        "replicate_preserved": replicate_preserved,
+        "normalization_metadata": normalization_metadata,
+        "repeated_structure_info": repeated_structure_info,
+        "recommended_data_type": repeated_structure_info.get("recommended_data_type", "cross"),
     }
 
 
