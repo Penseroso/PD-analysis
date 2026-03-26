@@ -5,7 +5,8 @@ import streamlit as st
 
 from config import SUPPORTED_FORMATS
 from utils.parser import detect_schema_candidates, normalize_to_long, parse_pasted_table
-from utils.state import reset_analysis_state
+from utils.state import init_session_state, reset_analysis_state
+from utils.ui import render_top_nav
 from utils.validators import validate_normalized_df
 
 
@@ -51,7 +52,9 @@ h1, h2, h3 {
 """
 
 
+init_session_state()
 st.markdown(CHROME_CSS, unsafe_allow_html=True)
+render_top_nav("Upload", "Prepare input data, confirm mapping, and normalize before analysis.")
 st.title("Upload And Mapping")
 st.caption("Prepare a pasted dataset, review the detected structure, configure column mapping, and verify normalization before continuing.")
 

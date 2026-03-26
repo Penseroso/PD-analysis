@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from utils.state import init_session_state
+from utils.ui import render_top_nav
 
 
 CHROME_CSS = """
@@ -151,6 +152,7 @@ def main() -> None:
     )
     init_session_state()
     st.markdown(CHROME_CSS, unsafe_allow_html=True)
+    render_top_nav("Home", "Jump between workflow stages and return here for overall status.")
 
     status_text = "Ready"
     if st.session_state.analysis_results:

@@ -3,7 +3,8 @@ from __future__ import annotations
 import streamlit as st
 
 from config import ANALYSIS_METHODS, DEFAULT_FIGURE_CONFIG
-from utils.state import reset_analysis_state
+from utils.state import init_session_state, reset_analysis_state
+from utils.ui import render_top_nav
 from utils.stats_cross import compute_cross_assumptions, run_cross_sectional
 from utils.stats_longitudinal import compute_longitudinal_assumptions, run_longitudinal
 from utils.stats_mixedlm import run_mixedlm
@@ -72,7 +73,9 @@ REPEATED_STRUCTURE_BLOCKING_REASON = (
 )
 
 
+init_session_state()
 st.markdown(CHROME_CSS, unsafe_allow_html=True)
+render_top_nav("Analysis", "Review readiness, configure the inferential plan, and run the analysis workbench.")
 st.title("Analysis")
 st.caption("Review normalized inputs, configure the inferential plan, run the analysis, and inspect results before export.")
 

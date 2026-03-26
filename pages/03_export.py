@@ -3,6 +3,8 @@ from __future__ import annotations
 import streamlit as st
 
 from utils.export import build_export_bundle
+from utils.state import init_session_state
+from utils.ui import render_top_nav
 
 
 CHROME_CSS = """
@@ -55,7 +57,9 @@ h1, h2, h3 {
 """
 
 
+init_session_state()
 st.markdown(CHROME_CSS, unsafe_allow_html=True)
+render_top_nav("Export", "Build the current bundle and download reporting artifacts.")
 st.title("Export")
 st.caption("Build the export bundle and download figures, normalized data, and statistics outputs for reporting.")
 
