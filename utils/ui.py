@@ -71,6 +71,13 @@ div[data-testid="stAlert"] {
 """
 
 
+def is_export_bundle_built(bundle: dict | None) -> bool:
+    if not isinstance(bundle, dict):
+        return False
+    artifact_keys = ("html", "png", "csv", "stats_csv")
+    return any(bundle.get(key) is not None for key in artifact_keys)
+
+
 def render_top_nav(current_page: str, subtitle: str | None = None) -> None:
     st.markdown(APP_SHELL_CSS, unsafe_allow_html=True)
     pages = [

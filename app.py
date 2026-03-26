@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from utils.state import init_session_state
-from utils.ui import render_top_nav
+from utils.ui import is_export_bundle_built, render_top_nav
 
 
 CHROME_CSS = """
@@ -171,7 +171,7 @@ def main() -> None:
     else:
         analysis_status = "Not run"
     figure_count = len(st.session_state.figure_objects or {})
-    export_status = "Built" if st.session_state.export_bundle else "Not built"
+    export_status = "Built" if is_export_bundle_built(st.session_state.export_bundle) else "Not built"
 
     st.markdown(
         f"""
@@ -249,3 +249,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

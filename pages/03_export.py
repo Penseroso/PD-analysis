@@ -4,7 +4,7 @@ import streamlit as st
 
 from utils.export import build_export_bundle
 from utils.state import init_session_state
-from utils.ui import render_top_nav
+from utils.ui import is_export_bundle_built, render_top_nav
 
 
 CHROME_CSS = """
@@ -68,6 +68,7 @@ normalized_df = st.session_state.normalized_df
 figure_objects = st.session_state.figure_objects or {}
 value_display_map = st.session_state.value_display_map or {}
 bundle = st.session_state.export_bundle
+bundle_built = is_export_bundle_built(bundle)
 
 if not analysis_results:
     with st.container(border=True):
@@ -90,7 +91,7 @@ elif len(figure_objects) == 1:
     png_mode = "Single PNG"
 else:
     png_mode = "ZIP"
-warning_count = len(bundle.get("warnings", [])) if bundle else 0
+warning_count = len(bundle.get("warnings", [])) if bundle_built else 0
 
 with st.container(border=True):
     st.markdown('<p class="section-eyebrow">Export Status</p>', unsafe_allow_html=True)
@@ -102,7 +103,7 @@ with st.container(border=True):
             ("Figures", str(len(figure_objects)), "Figure objects ready for export"),
         ],
         [
-            ("Bundle state", "Built" if bundle else "Not built", "Current session bundle state"),
+            ("Bundle state", "Built" if bundle_built else "Not built", "Current session bundle state"),
             ("PNG packaging", png_mode, "Expected PNG packaging mode"),
             ("Export warnings", str(warning_count), "Warnings in current bundle"),
         ],
@@ -137,13 +138,15 @@ with st.container(border=True):
             value_display_map=st.session_state.value_display_map,
         )
         bundle = st.session_state.export_bundle
+        bundle_built = is_export_bundle_built(bundle)
         st.success("Export bundle refreshed for the current session state.")
 
 bundle = st.session_state.export_bundle
+bundle_built = is_export_bundle_built(bundle)
 with st.container(border=True):
     st.markdown('<p class="section-eyebrow">Downloads</p>', unsafe_allow_html=True)
     st.subheader("Export Outputs")
-    if not bundle:
+    if not bundle_built:
         st.caption("Build the export bundle to populate the available artifacts and download actions.")
     artifact_defs = [
         {
@@ -214,7 +217,7 @@ with st.container(border=True):
 with st.container(border=True):
     st.markdown('<p class="section-eyebrow">Review Notes</p>', unsafe_allow_html=True)
     st.subheader("Export Warnings / Notes")
-    if not bundle:
+    if not bundle_built:
         st.caption("Warnings and notes will appear here after the export bundle is generated.")
     else:
         warnings = list(dict.fromkeys(bundle.get("warnings", [])))
