@@ -21,7 +21,7 @@ def make_figure(
         fig.add_trace(
             go.Box(
                 y=group_df[dv_col],
-                name=str(group_name),
+                name=str(group_name),`r`n                fillcolor="rgba(0,0,0,0)",
                 boxpoints="all" if config.get("show_points", True) else False,
                 jitter=0.25,
                 pointpos=0,
@@ -64,3 +64,4 @@ def _add_cross_annotations(fig: go.Figure, df: pd.DataFrame, dv_col: str, star_m
             showarrow=False,
         )
         current_y += step
+
