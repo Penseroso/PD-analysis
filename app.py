@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import streamlit as st
 
 from utils.state import init_session_state
@@ -132,9 +130,6 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="collapsed",
     )
-    st.warning("DEBUG MARKER: app.py loaded")
-    st.caption(f"RUN FILE: {__file__}")
-    st.caption(f"CWD: {os.getcwd()}")
     init_session_state()
     st.markdown(CHROME_CSS, unsafe_allow_html=True)
 
