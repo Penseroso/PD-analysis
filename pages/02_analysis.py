@@ -54,6 +54,11 @@ h1, h2, h3 {
     font-weight: 600;
     color: #111827;
 }
+.kpi-helper {
+    margin: 0.35rem 0 0 0;
+    font-size: 0.82rem;
+    color: #6b7280;
+}
 </style>
 """
 
@@ -91,6 +96,9 @@ time_order_metadata = st.session_state.time_order_metadata or {}
 normalization_metadata = st.session_state.normalization_metadata or {}
 replicate_preserved = bool(st.session_state.replicate_preserved)
 repeated_structure_info = detect_repeated_structure(df)
+analysis_result_count = len(st.session_state.analysis_results or {})
+figure_count = len(st.session_state.figure_objects or {})
+blocking_count = len(st.session_state.blocking_reasons or [])
 
 
 def _label_for_dv(column: str) -> str:
@@ -100,21 +108,34 @@ def _label_for_dv(column: str) -> str:
 preferred_data_type = "longitudinal" if repeated_structure_info.get("detected") else "cross"
 current_data_type = st.session_state.data_type if st.session_state.data_type in {"cross", "longitudinal"} else preferred_data_type
 group_levels = sorted(df["group"].dropna().astype(str).unique().tolist()) if "group" in df.columns else []
+default_dv = [col for col in (st.session_state.selected_dv_cols or all_dv_cols[:1]) if col in all_dv_cols] or all_dv_cols[:1]
+selected_dv_count = len(default_dv)
 
 with st.container(border=True):
     st.markdown('<p class="section-eyebrow">Dataset Status</p>', unsafe_allow_html=True)
     st.subheader("Analysis Context")
-    summary_cols = st.columns(4)
-    summary_items = [
-        ("Structure", "Repeated-measures detected" if repeated_structure_info.get("detected") else "Cross-sectional structure"),
-        ("Biomarkers", str(len(all_dv_cols))),
-        ("Group levels", str(len(group_levels))),
-        ("Replicates", "Preserved" if replicate_preserved else "Collapsed"),
+    kpi_rows = [
+        [
+            ("Structure", "Repeated-measures" if repeated_structure_info.get("detected") else "Cross-sectional", "Detected dataset structure"),
+            ("Biomarkers available", str(len(all_dv_cols)), "Value columns ready for analysis"),
+            ("Biomarkers selected", str(selected_dv_count), "Current biomarker selection"),
+            ("Group levels", str(len(group_levels)), "Distinct group labels"),
+        ],
+        [
+            ("Replicates", "Preserved" if replicate_preserved else "Collapsed", "Technical replicate state"),
+            ("Analysis results", str(analysis_result_count), "Results stored in session"),
+            ("Figures", str(figure_count), "Generated figure objects"),
+            ("Blocking items", str(blocking_count), "Current blocking reasons"),
+        ],
     ]
-    for col, (label, value) in zip(summary_cols, summary_items):
-        with col:
-            st.markdown(f'<p class="summary-label">{label}</p>', unsafe_allow_html=True)
-            st.markdown(f'<p class="summary-value">{value}</p>', unsafe_allow_html=True)
+    for row in kpi_rows:
+        cols = st.columns(4)
+        for col, (label, value, helper) in zip(cols, row):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f'<p class="summary-label">{label}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="summary-value">{value}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="kpi-helper">{helper}</p>', unsafe_allow_html=True)
     if time_order:
         st.caption("Inferred time order: " + " -> ".join(time_order))
         if time_order_metadata.get("ambiguous"):
@@ -140,7 +161,6 @@ with st.container(border=True):
         )
     st.session_state.data_type = data_type
 
-    default_dv = [col for col in (st.session_state.selected_dv_cols or all_dv_cols[:1]) if col in all_dv_cols] or all_dv_cols[:1]
     with row1_col2:
         selected_dv_cols = st.multiselect("Biomarkers", all_dv_cols, default=default_dv, format_func=_label_for_dv)
     st.session_state.selected_dv_cols = selected_dv_cols

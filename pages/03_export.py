@@ -46,6 +46,11 @@ h1, h2, h3 {
     font-weight: 600;
     color: #111827;
 }
+.kpi-helper {
+    margin: 0.35rem 0 0 0;
+    font-size: 0.82rem;
+    color: #6b7280;
+}
 </style>
 """
 
@@ -76,27 +81,36 @@ def _label_for_result(dv_col: str, result: dict) -> str:
 
 result_labels = [_label_for_result(dv_col, result) for dv_col, result in analysis_results.items()]
 if len(figure_objects) == 0:
-    png_mode = "No figure export"
+    png_mode = "None"
 elif len(figure_objects) == 1:
     png_mode = "Single PNG"
 else:
-    png_mode = "ZIP of multiple PNGs"
+    png_mode = "ZIP"
+warning_count = len(bundle.get("warnings", [])) if bundle else 0
 
 with st.container(border=True):
     st.markdown('<p class="section-eyebrow">Export Status</p>', unsafe_allow_html=True)
     st.subheader("Export Context")
-    summary_cols = st.columns(5)
-    summary_items = [
-        ("Normalized data", "Available" if normalized_df is not None else "Missing"),
-        ("Analysis results", str(len(analysis_results))),
-        ("Figures", str(len(figure_objects))),
-        ("Bundle state", "Built" if bundle else "Not built"),
-        ("PNG packaging", png_mode),
+    kpi_rows = [
+        [
+            ("Normalized data", "Available" if normalized_df is not None else "Missing", "Normalized dataset state"),
+            ("Analysis results", str(len(analysis_results)), "Result entries available"),
+            ("Figures", str(len(figure_objects)), "Figure objects ready for export"),
+        ],
+        [
+            ("Bundle state", "Built" if bundle else "Not built", "Current session bundle state"),
+            ("PNG packaging", png_mode, "Expected PNG packaging mode"),
+            ("Export warnings", str(warning_count), "Warnings in current bundle"),
+        ],
     ]
-    for col, (label, value) in zip(summary_cols, summary_items):
-        with col:
-            st.markdown(f'<p class="summary-label">{label}</p>', unsafe_allow_html=True)
-            st.markdown(f'<p class="summary-value">{value}</p>', unsafe_allow_html=True)
+    for row in kpi_rows:
+        cols = st.columns(3)
+        for col, (label, value, helper) in zip(cols, row):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f'<p class="summary-label">{label}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="summary-value">{value}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="kpi-helper">{helper}</p>', unsafe_allow_html=True)
     if result_labels:
         if len(result_labels) <= 4:
             st.caption("Biomarkers ready for export: " + ", ".join(result_labels))
@@ -136,7 +150,7 @@ with st.container(border=True):
             "data": None if bundle is None else bundle.get("html"),
             "file_name": "figures.html",
             "mime": "text/html",
-            "availability_text": "Available" if bundle is not None and bundle.get("html") is not None else "Not available",
+            "availability_text": "Available" if bundle is not None and bundle.get("html") is not None else "Missing",
         },
         {
             "title": "PNG Figure Export",
@@ -150,7 +164,7 @@ with st.container(border=True):
             "mime": None if bundle is None else (bundle.get("png_mime") or "image/png"),
             "availability_text": "ZIP of multiple PNGs"
             if bundle is not None and (bundle.get("png_mime") == "application/zip" or bundle.get("png_name") == "figures.zip")
-            else ("Single PNG" if bundle is not None and bundle.get("png") is not None else "Not available"),
+            else ("Single PNG" if bundle is not None and bundle.get("png") is not None else "Missing"),
         },
         {
             "title": "Normalized Data CSV",
@@ -160,7 +174,7 @@ with st.container(border=True):
             "data": None if bundle is None else bundle.get("csv"),
             "file_name": "normalized_data.csv",
             "mime": "text/csv",
-            "availability_text": "Available" if bundle is not None and bundle.get("csv") is not None else "Not available",
+            "availability_text": "Available" if bundle is not None and bundle.get("csv") is not None else "Missing",
         },
         {
             "title": "Stats Results CSV",
@@ -170,7 +184,7 @@ with st.container(border=True):
             "data": None if bundle is None else bundle.get("stats_csv"),
             "file_name": "stats_results.csv",
             "mime": "text/csv",
-            "availability_text": "Available" if bundle is not None and bundle.get("stats_csv") is not None else "Not available",
+            "availability_text": "Available" if bundle is not None and bundle.get("stats_csv") is not None else "Missing",
         },
     ]
 

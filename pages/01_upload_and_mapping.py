@@ -28,6 +28,25 @@ div.block-container {
 h1, h2, h3 {
     margin-top: 0;
 }
+.kpi-label {
+    margin: 0 0 0.2rem 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6b7280;
+}
+.kpi-value {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #111827;
+}
+.kpi-helper {
+    margin: 0.35rem 0 0 0;
+    font-size: 0.82rem;
+    color: #6b7280;
+}
 </style>
 """
 
@@ -35,6 +54,46 @@ h1, h2, h3 {
 st.markdown(CHROME_CSS, unsafe_allow_html=True)
 st.title("Upload And Mapping")
 st.caption("Prepare a pasted dataset, review the detected structure, configure column mapping, and verify normalization before continuing.")
+
+raw_df = st.session_state.raw_df
+parse_metadata = st.session_state.parse_metadata or {}
+detected_schema = st.session_state.detected_schema or {}
+if raw_df is None:
+    parse_status = "Not parsed"
+elif parse_metadata.get("parse_mode") == "raw_lines":
+    parse_status = "Raw fallback"
+else:
+    parse_status = "Structured"
+raw_rows = str(len(raw_df)) if raw_df is not None else "0"
+format_guess_text = detected_schema.get("format_type") or "Unknown"
+if st.session_state.normalized_df is not None:
+    normalization_status = "Ready"
+elif st.session_state.analysis_status == "blocked":
+    normalization_status = "Blocked"
+else:
+    normalization_status = "Not run"
+warnings_count = len(st.session_state.warnings or [])
+blocking_count = len(st.session_state.blocking_reasons or [])
+kpi_rows = [
+    [
+        ("Parse status", parse_status, "Current parse state"),
+        ("Raw rows", raw_rows, "Rows in current preview"),
+        ("Format guess", format_guess_text, "Detected source layout"),
+    ],
+    [
+        ("Normalization", normalization_status, "Current normalization state"),
+        ("Warnings", str(warnings_count), "Review items present"),
+        ("Blocking items", str(blocking_count), "Issues requiring action"),
+    ],
+]
+for row in kpi_rows:
+    cols = st.columns(3)
+    for col, (label, value, helper) in zip(cols, row):
+        with col:
+            with st.container(border=True):
+                st.markdown(f'<p class="kpi-label">{label}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p class="kpi-value">{value}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p class="kpi-helper">{helper}</p>', unsafe_allow_html=True)
 
 with st.container(border=True):
     st.subheader("Input Data")

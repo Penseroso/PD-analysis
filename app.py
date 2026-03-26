@@ -119,6 +119,25 @@ h1, h2, h3 {
     font-size: 0.9rem;
     line-height: 1.45;
 }
+.kpi-label {
+    margin: 0 0 0.2rem 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6b7280;
+}
+.kpi-value {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #111827;
+}
+.kpi-helper {
+    margin: 0.35rem 0 0 0;
+    font-size: 0.82rem;
+    color: #6b7280;
+}
 </style>
 """
 
@@ -141,6 +160,17 @@ def main() -> None:
     elif st.session_state.raw_df is not None:
         status_text = "Input parsed"
 
+    input_status = "Parsed" if st.session_state.raw_df is not None else "Empty"
+    normalization_status = "Ready" if st.session_state.normalized_df is not None else "Missing"
+    if st.session_state.analysis_results:
+        analysis_status = "Complete"
+    elif st.session_state.blocking_reasons:
+        analysis_status = "Blocked"
+    else:
+        analysis_status = "Not run"
+    figure_count = len(st.session_state.figure_objects or {})
+    export_status = "Built" if st.session_state.export_bundle else "Not built"
+
     st.markdown(
         f"""
         <section class="workspace-header">
@@ -157,6 +187,20 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+    kpi_cols = st.columns(5)
+    kpi_items = [
+        ("Input status", input_status, "Pasted data parsing state"),
+        ("Normalization", normalization_status, "Normalized dataset availability"),
+        ("Analysis", analysis_status, "Current inferential stage"),
+        ("Figures", str(figure_count), "Generated figure objects"),
+        ("Export bundle", export_status, "Current bundle state"),
+    ]
+    for col, (label, value, helper) in zip(kpi_cols, kpi_items):
+        with col:
+            with st.container(border=True):
+                st.markdown(f'<p class="kpi-label">{label}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p class="kpi-value">{value}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p class="kpi-helper">{helper}</p>', unsafe_allow_html=True)
     st.markdown(
         """
         <section class="workflow-section">
