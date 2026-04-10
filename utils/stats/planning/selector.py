@@ -44,7 +44,10 @@ def recommend_analysis_plan(
         between_factors=between_factors,
         n_per_group=n_per_group,
     )
-    defaults = build_policy_defaults(recommended_method)
+    defaults = build_policy_defaults(
+        recommended_method,
+        control_group=control_group if control_group is not None else validation_result.get("control_group"),
+    )
     recommended_plan = build_analysis_plan(
         data_type=data_type,
         design_family=data_type,

@@ -27,6 +27,8 @@ def recommend_omnibus_method(
     n_groups = len(longitudinal_n_per_group) if longitudinal_n_per_group else 0
 
     if data_type == "cross":
+        if len(between_factors) >= 2:
+            return "two_way_anova"
         if any_non_normal:
             return "kruskal"
         if unequal_variance:
@@ -42,8 +44,8 @@ def recommend_omnibus_method(
     return "mixed_anova"
 
 
-def build_policy_defaults(omnibus_method: str) -> dict:
-    posthoc_method = get_default_posthoc_method(omnibus_method)
+def build_policy_defaults(omnibus_method: str, *, control_group: str | None = None) -> dict:
+    posthoc_method = get_default_posthoc_method(omnibus_method, control_group=control_group)
     posthoc_metadata = get_posthoc_metadata(posthoc_method)
     return {
         "omnibus_method": omnibus_method,

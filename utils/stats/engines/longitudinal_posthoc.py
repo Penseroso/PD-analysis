@@ -7,6 +7,12 @@ import pandas as pd
 import pingouin as pg
 from scipy import stats
 
+from utils.stats.engines.multiplicity import (
+    apply_multiplicity_to_pairwise_table,
+    build_correction_metadata,
+    resolve_pingouin_padjust,
+)
+
 
 def run_pairwise_time_tests(
     df: pd.DataFrame,
@@ -23,12 +29,12 @@ def run_pairwise_time_tests(
         within=time_col,
         subject=subject_col,
         parametric=True,
-        padjust=_resolve_pingouin_padjust(multiplicity_method),
+        padjust=resolve_pingouin_padjust(multiplicity_method),
         effsize="hedges",
     )
     posthoc = _format_pairwise_time_tests(pairwise, interpretation_basis=interpretation_basis)
     posthoc["p_adjust"] = multiplicity_method
-    return _payload(posthoc, [])
+    return _payload(posthoc, [], correction_method=multiplicity_method, correction_source="external")
 
 
 def run_pairwise_wilcoxon(
@@ -64,8 +70,8 @@ def run_pairwise_wilcoxon(
                 "interpretation_basis": "pairwise_nonparametric",
             }
         )
-    posthoc = _apply_pairwise_multiplicity(pd.DataFrame(rows), multiplicity_method)
-    return _payload(posthoc, [])
+    posthoc = apply_multiplicity_to_pairwise_table(pd.DataFrame(rows), multiplicity_method)
+    return _payload(posthoc, [], correction_method=multiplicity_method, correction_source="external")
 
 
 def run_pairwise_group_at_time_tests(
@@ -84,16 +90,16 @@ def run_pairwise_group_at_time_tests(
         between=group_col,
         subject=subject_col,
         parametric=True,
-        padjust=_resolve_pingouin_padjust(multiplicity_method),
+        padjust=resolve_pingouin_padjust(multiplicity_method),
         effsize="hedges",
         interaction=True,
     )
     posthoc = _format_pairwise_mixed_tests(pairwise, time_col, group_col)
     posthoc["p_adjust"] = multiplicity_method
-    return _payload(posthoc, [])
+    return _payload(posthoc, [], correction_method=multiplicity_method, correction_source="external")
 
 
-def _payload(table: pd.DataFrame, warnings: list[str]) -> dict:
+def _payload(table: pd.DataFrame, warnings: list[str], *, correction_method: str | None, correction_source: str | None) -> dict:
     if table.empty:
         table = pd.DataFrame(
             columns=[
@@ -117,26 +123,14 @@ def _payload(table: pd.DataFrame, warnings: list[str]) -> dict:
             ]
         )
     pairwise_effects = table[[column for column in ["comparison", "time_a", "time_b", "effect_estimate", "effect_metric", "interpretation_basis"] if column in table.columns]].copy()
-    return {"pairwise_table": table, "warnings": warnings, "metadata": {"effect_sizes": {"pairwise": pairwise_effects}}}
-
-
-def _apply_pairwise_multiplicity(table: pd.DataFrame, multiplicity_method: str | None) -> pd.DataFrame:
-    if table.empty or multiplicity_method in {None, "none"}:
-        return table
-    adjusted = table.copy()
-    if multiplicity_method == "bonferroni" and "p_unc" in adjusted.columns:
-        n_tests = max(1, len(adjusted))
-        adjusted["pvalue"] = adjusted["p_unc"].apply(lambda value: _safe_float(min(float(value) * n_tests, 1.0)))
-        adjusted["p_adjust"] = "bonferroni"
-    return adjusted
-
-
-def _resolve_pingouin_padjust(multiplicity_method: str | None) -> str:
-    if multiplicity_method in {None, "none"}:
-        return "none"
-    if multiplicity_method == "bonferroni":
-        return "bonf"
-    return "none"
+    return {
+        "pairwise_table": table,
+        "warnings": warnings,
+        "metadata": {
+            "effect_sizes": {"pairwise": pairwise_effects},
+            "correction_applied": build_correction_metadata(multiplicity_method=correction_method, source=correction_source or "external"),
+        },
+    }
 
 
 def _format_pairwise_time_tests(pairwise: pd.DataFrame, interpretation_basis: str) -> pd.DataFrame:

@@ -14,6 +14,7 @@ class PosthocMetadata:
     default_multiplicity_method: str | None
     execution_family: str
     internally_controls_error: bool = False
+    requires_factor2: bool = False
 
 
 POSTHOC_ALIASES = {
@@ -36,6 +37,17 @@ POSTHOC_REGISTRY: dict[str, PosthocMetadata] = {
         execution_family="scipy",
         internally_controls_error=True,
     ),
+    "tukey_hsd": PosthocMetadata(
+        id="tukey_hsd",
+        label="Tukey HSD",
+        compatible_omnibus_methods=("one_way_anova",),
+        compatible_data_types=("cross",),
+        comparison_mode="all_pairs",
+        supports_control_group=False,
+        default_multiplicity_method=None,
+        execution_family="statsmodels",
+        internally_controls_error=True,
+    ),
     "games_howell": PosthocMetadata(
         id="games_howell",
         label="Games-Howell",
@@ -56,6 +68,27 @@ POSTHOC_REGISTRY: dict[str, PosthocMetadata] = {
         supports_control_group=False,
         default_multiplicity_method="bonferroni",
         execution_family="scipy",
+    ),
+    "dunn": PosthocMetadata(
+        id="dunn",
+        label="Dunn test",
+        compatible_omnibus_methods=("kruskal",),
+        compatible_data_types=("cross",),
+        comparison_mode="all_pairs",
+        supports_control_group=False,
+        default_multiplicity_method="holm",
+        execution_family="scipy",
+    ),
+    "group_pairwise_by_factor": PosthocMetadata(
+        id="group_pairwise_by_factor",
+        label="Group pairwise by factor2",
+        compatible_omnibus_methods=("two_way_anova",),
+        compatible_data_types=("cross",),
+        comparison_mode="all_pairs",
+        supports_control_group=False,
+        default_multiplicity_method="bonferroni",
+        execution_family="pingouin",
+        requires_factor2=True,
     ),
     "pairwise_ttests": PosthocMetadata(
         id="pairwise_ttests",

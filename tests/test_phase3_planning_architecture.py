@@ -54,8 +54,8 @@ def test_cross_normal_equal_variance_plan() -> None:
     plan = result["recommended_plan"]
     assert plan.design_family == "cross"
     assert plan.omnibus_method == "one_way_anova"
-    assert plan.posthoc_method == "dunnett"
-    assert plan.comparison_mode == "control_based"
+    assert plan.posthoc_method == "tukey_hsd"
+    assert plan.comparison_mode == "all_pairs"
     assert plan.multiplicity_method is None
     assert plan.engine == "pingouin"
 
@@ -88,9 +88,9 @@ def test_cross_non_normal_plan() -> None:
 
     plan = result["recommended_plan"]
     assert plan.omnibus_method == "kruskal"
-    assert plan.posthoc_method == "mannwhitney_pairwise"
+    assert plan.posthoc_method == "dunn"
     assert plan.comparison_mode == "all_pairs"
-    assert plan.multiplicity_method == "bonferroni"
+    assert plan.multiplicity_method == "holm"
     assert plan.engine == "scipy"
 
 
@@ -172,6 +172,27 @@ def test_balanced_multi_group_repeated_plan() -> None:
     assert plan.engine == "pingouin"
 
 
+def test_cross_two_factor_design_prefers_two_way_anova() -> None:
+    result = recommend_analysis_plan(
+        validation_result=_validation_result(
+            data_type="cross",
+            between_factors=["group", "factor2"],
+            factor2_col="factor2",
+            n_per_group={"A": 6, "B": 6},
+        ),
+        diagnostics_context=_diagnostics(
+            normality={"A|X": {"is_normal": True}, "B|X": {"is_normal": True}},
+            levene={"equal_variance": True},
+        ),
+        factor2_col="factor2",
+    )
+
+    plan = result["recommended_plan"]
+    assert plan.omnibus_method == "two_way_anova"
+    assert plan.posthoc_method == "group_pairwise_by_factor"
+    assert plan.factor2_col == "factor2"
+
+
 def test_multifactor_or_incomplete_repeated_plan_uses_mixedlm_with_rationale() -> None:
     multifactor = recommend_analysis_plan(
         validation_result=_validation_result(
@@ -212,9 +233,9 @@ def test_legacy_method_override_translates_into_new_plan_structure_correctly() -
 
     plan = result["resolved_plan"]
     assert plan.omnibus_method == "kruskal"
-    assert plan.posthoc_method == "mannwhitney_pairwise"
+    assert plan.posthoc_method == "dunn"
     assert plan.comparison_mode == "all_pairs"
-    assert plan.multiplicity_method == "bonferroni"
+    assert plan.multiplicity_method == "holm"
     assert plan.engine == "scipy"
     assert plan.control_group == "A"
 
@@ -260,5 +281,5 @@ def test_legacy_selector_wrapper_still_returns_page_expected_keys() -> None:
     for key in ("recommended_method", "recommended_engine", "recommended_plan", "resolved_plan", "rationale", "can_override", "fallback_reason", "selector_metadata"):
         assert key in result
     assert result["recommended_method"] == "one_way_anova"
-    assert result["recommended_plan"].posthoc_method == "dunnett"
-    assert result["selector_metadata"]["effective_comparison_mode"] == "control_based"
+    assert result["recommended_plan"].posthoc_method == "tukey_hsd"
+    assert result["selector_metadata"]["effective_comparison_mode"] == "all_pairs"

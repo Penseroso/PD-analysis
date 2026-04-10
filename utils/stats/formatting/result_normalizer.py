@@ -45,6 +45,8 @@ def to_legacy_cross_payload(result: AnalysisResult, *, assumptions: dict, dv_col
         "warnings": result.warnings,
         "blocking_reasons": result.blocking_reasons,
         "suggested_actions": result.suggested_actions,
+        "outlier_summary": metadata.get("outlier_summary"),
+        "sensitivity_analysis": metadata.get("sensitivity_analysis"),
         "dv_col": dv_col,
     }
 
@@ -70,6 +72,8 @@ def to_legacy_longitudinal_payload(
         "warnings": result.warnings,
         "blocking_reasons": result.blocking_reasons,
         "suggested_actions": result.suggested_actions,
+        "outlier_summary": metadata.get("outlier_summary"),
+        "sensitivity_analysis": metadata.get("sensitivity_analysis"),
         "dv_col": dv_col,
         "time_order": time_order,
     }
@@ -91,6 +95,8 @@ def to_legacy_mixedlm_payload(result: AnalysisResult, *, dv_col: str, time_order
         "warnings": result.warnings,
         "blocking_reasons": result.blocking_reasons,
         "suggested_actions": result.suggested_actions,
+        "outlier_summary": metadata.get("outlier_summary"),
+        "sensitivity_analysis": metadata.get("sensitivity_analysis"),
         "dv_col": dv_col,
         "time_order": time_order,
     }

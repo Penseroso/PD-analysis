@@ -56,6 +56,8 @@ def run_page_analysis_for_dv(
     reference_group: str | None,
     factor2_col: str | None,
     time_order: list[str] | None = None,
+    outlier_method: str = "modified_zscore",
+    outlier_handling: str = "include_all",
 ) -> dict:
     preview = preview_plan(
         df=df,
@@ -96,6 +98,8 @@ def run_page_analysis_for_dv(
     result = execute_and_normalize(
         selection["resolved_plan"],
         diagnostics=diagnostics,
+        outlier_method=outlier_method,
+        outlier_handling=outlier_handling,
         df=df,
         dv_col=dv_col,
         group_col="group",

@@ -61,10 +61,14 @@ def test_analysis_plan_round_trip_includes_comparison_posthoc_and_multiplicity()
 def test_registry_lookup_exposes_expected_posthoc_and_multiplicity_contracts() -> None:
     dunnett = get_posthoc_metadata("dunnett")
     bonferroni = get_multiplicity_metadata("bonferroni")
+    dunn = get_posthoc_metadata("dunn")
+    holm = get_multiplicity_metadata("holm")
 
     assert dunnett is not None and dunnett.comparison_mode == "control_based"
     assert dunnett.default_multiplicity_method is None
     assert bonferroni is not None and "mannwhitney_pairwise" in bonferroni.compatible_posthocs
+    assert dunn is not None and dunn.default_multiplicity_method == "holm"
+    assert holm is not None and "dunn" in holm.compatible_posthocs
 
 
 def test_valid_cross_control_based_plan_passes_compatibility() -> None:
@@ -212,7 +216,7 @@ def test_dispatch_passes_multiplicity_method_into_pairwise_execution(monkeypatch
         captured["multiplicity_method"] = multiplicity_method
         return {"pairwise_table": pd.DataFrame(), "warnings": [], "metadata": {"effect_sizes": {"pairwise": pd.DataFrame()}}}
 
-    monkeypatch.setattr("utils.stats.engines.cross_posthoc.run_pairwise_mannwhitney", _pairwise)
+    monkeypatch.setattr("utils.stats.engines.cross_posthoc.run_dunn", _pairwise)
 
     plan = build_analysis_plan_contract(data_type="cross", omnibus_method="kruskal")
     execute_plan(
@@ -222,7 +226,192 @@ def test_dispatch_passes_multiplicity_method_into_pairwise_execution(monkeypatch
         group_col="group",
     )
 
-    assert captured["multiplicity_method"] == "bonferroni"
+    assert captured["multiplicity_method"] == "holm"
+
+
+def test_one_way_anova_with_tukey_hsd_executes() -> None:
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * 4 + ["B"] * 4 + ["C"] * 4,
+            "value": [1.0, 1.1, 1.2, 1.3, 2.0, 2.1, 2.2, 2.3, 3.0, 3.1, 3.2, 3.3],
+        }
+    )
+    plan = AnalysisPlan(
+        data_type="cross",
+        design_family="cross",
+        comparison_mode="all_pairs",
+        omnibus_method="one_way_anova",
+        posthoc_method="tukey_hsd",
+        multiplicity_method=None,
+        engine="pingouin",
+        effect_size_policy="omega_squared",
+        control_group=None,
+        reference_group=None,
+        factor2_col=None,
+        warnings=[],
+    )
+
+    result = execute_plan(plan, df=df, dv_col="value", group_col="group")
+
+    assert result["omnibus_table"] is not None
+    assert result["pairwise_table"] is not None
+    assert set(result["pairwise_table"]["test"]) == {"tukey_hsd"}
+
+
+def test_kruskal_with_dunn_and_holm_executes() -> None:
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * 4 + ["B"] * 4 + ["C"] * 4,
+            "value": [1.0, 1.4, 1.9, 2.2, 3.2, 3.7, 4.1, 4.4, 5.1, 5.5, 5.9, 6.2],
+        }
+    )
+    plan = AnalysisPlan(
+        data_type="cross",
+        design_family="cross",
+        comparison_mode="all_pairs",
+        omnibus_method="kruskal",
+        posthoc_method="dunn",
+        multiplicity_method="holm",
+        engine="scipy",
+        effect_size_policy="epsilon_squared",
+        control_group=None,
+        reference_group=None,
+        factor2_col=None,
+        warnings=[],
+    )
+
+    result = execute_plan(plan, df=df, dv_col="value", group_col="group")
+
+    assert set(result["pairwise_table"]["test"]) == {"dunn"}
+    assert set(result["pairwise_table"]["p_adjust"]) == {"holm"}
+
+
+def test_kruskal_with_dunn_and_fdr_executes() -> None:
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * 4 + ["B"] * 4 + ["C"] * 4,
+            "value": [1.0, 1.4, 1.9, 2.2, 3.2, 3.7, 4.1, 4.4, 5.1, 5.5, 5.9, 6.2],
+        }
+    )
+    plan = AnalysisPlan(
+        data_type="cross",
+        design_family="cross",
+        comparison_mode="all_pairs",
+        omnibus_method="kruskal",
+        posthoc_method="dunn",
+        multiplicity_method="fdr_bh",
+        engine="scipy",
+        effect_size_policy="epsilon_squared",
+        control_group=None,
+        reference_group=None,
+        factor2_col=None,
+        warnings=[],
+    )
+
+    result = execute_plan(plan, df=df, dv_col="value", group_col="group")
+
+    assert set(result["pairwise_table"]["p_adjust"]) == {"fdr_bh"}
+
+
+def test_mannwhitney_pairwise_with_holm_executes() -> None:
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * 4 + ["B"] * 4 + ["C"] * 4,
+            "value": [1.0, 1.4, 1.9, 2.2, 3.2, 3.7, 4.1, 4.4, 5.1, 5.5, 5.9, 6.2],
+        }
+    )
+    plan = AnalysisPlan(
+        data_type="cross",
+        design_family="cross",
+        comparison_mode="all_pairs",
+        omnibus_method="kruskal",
+        posthoc_method="mannwhitney_pairwise",
+        multiplicity_method="holm",
+        engine="scipy",
+        effect_size_policy="epsilon_squared",
+        control_group=None,
+        reference_group=None,
+        factor2_col=None,
+        warnings=[],
+    )
+
+    result = execute_plan(plan, df=df, dv_col="value", group_col="group")
+
+    assert set(result["pairwise_table"]["p_adjust"]) == {"holm"}
+
+
+def test_games_howell_with_external_correction_is_blocked() -> None:
+    plan = AnalysisPlan(
+        data_type="cross",
+        design_family="cross",
+        comparison_mode="all_pairs",
+        omnibus_method="welch_anova",
+        posthoc_method="games_howell",
+        multiplicity_method="holm",
+        engine="pingouin",
+        effect_size_policy="omega_squared",
+        control_group=None,
+        reference_group=None,
+        factor2_col=None,
+        warnings=[],
+    )
+
+    reasons = validate_plan_compatibility(plan, _validation_result(data_type="cross"))
+
+    assert any("already controls pairwise error internally" in reason for reason in reasons)
+
+
+def test_two_way_anova_with_factor2_executes() -> None:
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * 6 + ["B"] * 6,
+            "factor2": ["X"] * 3 + ["Y"] * 3 + ["X"] * 3 + ["Y"] * 3,
+            "value": [1.0, 1.1, 1.2, 1.5, 1.6, 1.7, 2.0, 2.1, 2.2, 2.7, 2.8, 2.9],
+        }
+    )
+    plan = AnalysisPlan(
+        data_type="cross",
+        design_family="cross",
+        comparison_mode="all_pairs",
+        omnibus_method="two_way_anova",
+        posthoc_method="group_pairwise_by_factor",
+        multiplicity_method="bonferroni",
+        engine="pingouin",
+        effect_size_policy="omega_squared",
+        control_group=None,
+        reference_group=None,
+        factor2_col="factor2",
+        warnings=[],
+    )
+
+    result = execute_plan(plan, df=df, dv_col="value", group_col="group", factor2_col="factor2")
+
+    assert set(result["omnibus_table"]["term"]) == {"group", "factor2", "group * factor2"}
+    assert result["pairwise_table"] is not None
+
+
+def test_two_way_anova_without_factor2_is_blocked() -> None:
+    plan = AnalysisPlan(
+        data_type="cross",
+        design_family="cross",
+        comparison_mode="all_pairs",
+        omnibus_method="two_way_anova",
+        posthoc_method="group_pairwise_by_factor",
+        multiplicity_method="bonferroni",
+        engine="pingouin",
+        effect_size_policy="omega_squared",
+        control_group=None,
+        reference_group=None,
+        factor2_col=None,
+        warnings=[],
+    )
+
+    reasons = validate_plan_compatibility(
+        plan,
+        _validation_result(data_type="cross", between_factors=["group", "factor2"]),
+    )
+
+    assert "requires a selected factor2 column" in " ".join(reasons)
 
 
 def test_legacy_posthoc_alias_resolves_to_new_identifier() -> None:
@@ -238,6 +427,6 @@ def test_apply_plan_overrides_re_normalizes_dependent_defaults() -> None:
     updated = apply_plan_overrides(base_plan, omnibus_method="kruskal")
 
     assert updated.omnibus_method == "kruskal"
-    assert updated.posthoc_method == "mannwhitney_pairwise"
-    assert updated.multiplicity_method == "bonferroni"
+    assert updated.posthoc_method == "dunn"
+    assert updated.multiplicity_method == "holm"
     assert updated.comparison_mode == "all_pairs"

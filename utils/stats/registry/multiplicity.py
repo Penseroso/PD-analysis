@@ -15,12 +15,33 @@ MULTIPLICITY_REGISTRY: dict[str, MultiplicityMetadata] = {
     "bonferroni": MultiplicityMetadata(
         id="bonferroni",
         label="Bonferroni",
-        compatible_posthocs=("mannwhitney_pairwise", "pairwise_ttests", "pairwise_tests", "pairwise_wilcoxon"),
+        compatible_posthocs=("mannwhitney_pairwise", "dunn", "group_pairwise_by_factor", "pairwise_ttests", "pairwise_tests", "pairwise_wilcoxon"),
+    ),
+    "holm": MultiplicityMetadata(
+        id="holm",
+        label="Holm",
+        compatible_posthocs=("mannwhitney_pairwise", "dunn", "group_pairwise_by_factor", "pairwise_ttests", "pairwise_tests", "pairwise_wilcoxon"),
+    ),
+    "fdr_bh": MultiplicityMetadata(
+        id="fdr_bh",
+        label="FDR (Benjamini-Hochberg)",
+        compatible_posthocs=("mannwhitney_pairwise", "dunn", "group_pairwise_by_factor", "pairwise_ttests", "pairwise_tests", "pairwise_wilcoxon"),
     ),
     "none": MultiplicityMetadata(
         id="none",
         label="No extra correction",
-        compatible_posthocs=("dunnett", "games_howell", "reference_contrasts"),
+        compatible_posthocs=(
+            "dunnett",
+            "tukey_hsd",
+            "games_howell",
+            "mannwhitney_pairwise",
+            "dunn",
+            "group_pairwise_by_factor",
+            "pairwise_ttests",
+            "pairwise_tests",
+            "pairwise_wilcoxon",
+            "reference_contrasts",
+        ),
         allows_none=True,
     ),
 }

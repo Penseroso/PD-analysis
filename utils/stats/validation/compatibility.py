@@ -1,43 +1,55 @@
 from __future__ import annotations
 
 from utils.stats.contracts.analysis_plan import AnalysisPlan
+from utils.stats.registry.defaults import get_default_multiplicity_method, get_default_posthoc_method
 from utils.stats.registry.multiplicity import get_multiplicity_metadata, normalize_multiplicity_method
 from utils.stats.registry.methods import get_method_metadata
 from utils.stats.registry.posthocs import get_posthoc_metadata, resolve_posthoc_id
 
 
-def validate_plan_compatibility(
+def assess_plan_compatibility(
     plan: AnalysisPlan,
     validation_result: dict,
     diagnostics_context: dict | None = None,
-) -> list[str]:
-    """Validate a resolved AnalysisPlan against the inspected dataset design."""
+) -> dict[str, list[str]]:
     diagnostics_context = diagnostics_context or {}
     data_type = validation_result.get("data_type")
 
     if plan.data_type != data_type:
-        return [f"Plan data type '{plan.data_type}' is not compatible with validated data type '{data_type}'."]
+        return {"blocking_reasons": [f"Plan data type '{plan.data_type}' is not compatible with validated data type '{data_type}'."], "warnings": []}
 
     metadata = get_method_metadata(plan.omnibus_method)
     if metadata is None:
-        return []
+        return {"blocking_reasons": [], "warnings": []}
 
     if plan.engine != metadata.engine:
-        return [f"Plan engine '{plan.engine}' is not valid for omnibus method '{plan.omnibus_method}'."]
+        return {"blocking_reasons": [f"Plan engine '{plan.engine}' is not valid for omnibus method '{plan.omnibus_method}'."], "warnings": []}
 
     if data_type not in metadata.compatible_data_types:
-        return [f"Method '{plan.omnibus_method}' is only valid for {metadata.family} designs."]
+        return {"blocking_reasons": [f"Method '{plan.omnibus_method}' is only valid for {metadata.family} designs."], "warnings": []}
 
     if plan.design_family != data_type:
-        return [f"Plan design family '{plan.design_family}' is not compatible with data type '{data_type}'."]
+        return {"blocking_reasons": [f"Plan design family '{plan.design_family}' is not compatible with data type '{data_type}'."], "warnings": []}
 
     posthoc_metadata = get_posthoc_metadata(plan.posthoc_method)
     normalized_multiplicity = normalize_multiplicity_method(plan.multiplicity_method)
     multiplicity_metadata = get_multiplicity_metadata(plan.multiplicity_method)
 
     blocking_reasons: list[str] = []
+    warnings: list[str] = []
+    between_factors = validation_result.get("between_factors", [])
     if plan.posthoc_method is not None and posthoc_metadata is None:
         blocking_reasons.append(f"Post-hoc method '{plan.posthoc_method}' is not recognized.")
+    if metadata.requires_factor2 and not plan.factor2_col:
+        blocking_reasons.append(f"Method '{plan.omnibus_method}' requires a selected factor2 column.")
+    if metadata.min_between_subject_factors is not None and len(validation_result.get("between_factors", [])) < metadata.min_between_subject_factors:
+        blocking_reasons.append(
+            f"Method '{plan.omnibus_method}' requires at least {metadata.min_between_subject_factors} between-subject factor(s)."
+        )
+    if metadata.max_between_subject_factors is not None and len(between_factors) > metadata.max_between_subject_factors:
+        blocking_reasons.append(
+            f"Method '{plan.omnibus_method}' supports at most {metadata.max_between_subject_factors} between-subject factor(s), but {len(between_factors)} were provided."
+        )
     if posthoc_metadata is not None:
         if data_type not in posthoc_metadata.compatible_data_types:
             blocking_reasons.append(
@@ -55,8 +67,8 @@ def validate_plan_compatibility(
             blocking_reasons.append("Control-based comparisons require a selected control group.")
         if posthoc_metadata.comparison_mode == "reference_based" and plan.reference_group is None:
             blocking_reasons.append("Reference contrasts require a selected reference group.")
-        if posthoc_metadata.comparison_mode == "all_pairs" and posthoc_metadata.supports_control_group is False and plan.control_group and posthoc_metadata.id != "reference_contrasts":
-            pass
+        if posthoc_metadata.requires_factor2 and not plan.factor2_col:
+            blocking_reasons.append(f"Post-hoc method '{posthoc_metadata.id}' requires a selected factor2 column.")
 
     if multiplicity_metadata is None and normalized_multiplicity is not None:
         blocking_reasons.append(f"Multiplicity method '{plan.multiplicity_method}' is not recognized.")
@@ -71,7 +83,7 @@ def validate_plan_compatibility(
             )
 
     if data_type != "longitudinal":
-        return blocking_reasons
+        return {"blocking_reasons": blocking_reasons, "warnings": warnings}
 
     balance_info = validation_result.get("balance_info", {})
     n_subjects_per_group = balance_info.get("n_subjects_per_group") or {}
@@ -79,8 +91,6 @@ def validate_plan_compatibility(
     n_groups = len(n_subjects_per_group) if n_subjects_per_group else 0
     repeated_missing = balance_info.get("has_missing_repeated_cells", False)
     is_balanced = balance_info.get("is_balanced", True)
-    between_factors = validation_result.get("between_factors", [])
-
     if metadata.requires_single_group and n_groups > 1:
         blocking_reasons.append(
             f"Method '{plan.omnibus_method}' requires a single-group repeated-measures design, but {n_groups} groups are present."
@@ -93,17 +103,26 @@ def validate_plan_compatibility(
         blocking_reasons.append(
             f"Method '{plan.omnibus_method}' requires complete repeated cells for each subject across all expected time levels."
         )
-    if metadata.max_between_subject_factors is not None and len(between_factors) > metadata.max_between_subject_factors:
-        blocking_reasons.append(
-            f"Method '{plan.omnibus_method}' supports at most {metadata.max_between_subject_factors} between-subject factor(s), but {len(between_factors)} were provided."
-        )
     if plan.omnibus_method in {"rm_anova", "friedman", "mixed_anova"} and n_complete_subjects_per_group:
         too_small = [group for group, count in n_complete_subjects_per_group.items() if count < 2]
         if too_small:
             blocking_reasons.append(
                 f"Method '{plan.omnibus_method}' requires at least 2 complete subjects per group; too few complete subjects were found in: {', '.join(map(str, too_small))}."
             )
-    return blocking_reasons
+    return {"blocking_reasons": blocking_reasons, "warnings": warnings}
+
+
+def validate_plan_compatibility(
+    plan: AnalysisPlan,
+    validation_result: dict,
+    diagnostics_context: dict | None = None,
+) -> list[str]:
+    """Validate a resolved AnalysisPlan against the inspected dataset design."""
+    return assess_plan_compatibility(
+        plan=plan,
+        validation_result=validation_result,
+        diagnostics_context=diagnostics_context,
+    )["blocking_reasons"]
 
 
 def validate_resolved_plan_compatibility(validation_result: dict, final_method: str) -> list[str]:
@@ -112,13 +131,15 @@ def validate_resolved_plan_compatibility(validation_result: dict, final_method: 
     metadata = get_method_metadata(final_method)
     if metadata is None:
         return []
+    default_posthoc = get_default_posthoc_method(final_method, control_group=validation_result.get("control_group"))
+    posthoc_metadata = get_posthoc_metadata(default_posthoc)
     plan = AnalysisPlan(
         data_type=validation_result.get("data_type", metadata.family),
         design_family=validation_result.get("data_type", metadata.family),
-        comparison_mode=get_posthoc_metadata(metadata.default_posthoc).comparison_mode if get_posthoc_metadata(metadata.default_posthoc) else None,
+        comparison_mode=posthoc_metadata.comparison_mode if posthoc_metadata else None,
         omnibus_method=final_method,
-        posthoc_method=resolve_posthoc_id(metadata.default_posthoc),
-        multiplicity_method=None,
+        posthoc_method=resolve_posthoc_id(default_posthoc),
+        multiplicity_method=get_default_multiplicity_method(default_posthoc),
         engine=metadata.engine,
         effect_size_policy=metadata.default_effect_size_key,
         control_group=validation_result.get("control_group"),

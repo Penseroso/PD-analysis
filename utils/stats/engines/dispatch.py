@@ -32,23 +32,40 @@ def execute_plan(
             reference_group=reference_group or plan.reference_group,
         )
     if plan.data_type == "cross":
-        return _execute_cross_plan(plan, df=df, dv_col=dv_col, group_col=group_col, control_group=control_group or plan.control_group)
+        return _execute_cross_plan(
+            plan,
+            df=df,
+            dv_col=dv_col,
+            group_col=group_col,
+            factor2_col=factor2_col or plan.factor2_col,
+            control_group=control_group or plan.control_group,
+        )
     return _execute_longitudinal_plan(plan, df=df, dv_col=dv_col, group_col=group_col, subject_col=subject_col, time_col=time_col)
 
 
-def _execute_cross_plan(plan, *, df: pd.DataFrame, dv_col: str, group_col: str, control_group: str | None) -> dict:
+def _execute_cross_plan(plan, *, df: pd.DataFrame, dv_col: str, group_col: str, factor2_col: str | None, control_group: str | None) -> dict:
     omnibus_runner = {
         "one_way_anova": cross_omnibus.run_one_way_anova,
         "welch_anova": cross_omnibus.run_welch_anova,
         "kruskal": cross_omnibus.run_kruskal,
+        "two_way_anova": lambda frame, dv_name, group_name: cross_omnibus.run_two_way_anova(frame, dv_name, group_name, factor2_col),
     }[plan.omnibus_method]
     posthoc_runner = {
         "dunnett": lambda: cross_posthoc.run_dunnett(df, dv_col, group_col, control_group),
+        "tukey_hsd": lambda: cross_posthoc.run_tukey_hsd(df, dv_col, group_col),
         "games_howell": lambda: cross_posthoc.run_games_howell(df, dv_col, group_col),
+        "dunn": lambda: cross_posthoc.run_dunn(df, dv_col, group_col, multiplicity_method=plan.multiplicity_method),
         "mannwhitney_pairwise": lambda: cross_posthoc.run_pairwise_mannwhitney(
             df,
             dv_col,
             group_col,
+            multiplicity_method=plan.multiplicity_method,
+        ),
+        "group_pairwise_by_factor": lambda: cross_posthoc.run_group_pairwise_by_factor(
+            df,
+            dv_col,
+            group_col,
+            factor2_col,
             multiplicity_method=plan.multiplicity_method,
         ),
         None: lambda: {"pairwise_table": None, "warnings": [], "metadata": {"effect_sizes": {"pairwise": None}}},

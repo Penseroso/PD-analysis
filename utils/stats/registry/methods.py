@@ -18,6 +18,8 @@ class MethodMetadata:
     default_effect_size_key: str | None
     requires_single_group: bool = False
     requires_multiple_groups: bool = False
+    requires_factor2: bool = False
+    min_between_subject_factors: int | None = None
 
 
 METHOD_REGISTRY: dict[str, MethodMetadata] = {
@@ -31,7 +33,7 @@ METHOD_REGISTRY: dict[str, MethodMetadata] = {
         requires_repeated_measures=False,
         requires_complete_repeated=False,
         max_between_subject_factors=1,
-        default_posthoc="dunnett",
+        default_posthoc="tukey_hsd",
         default_effect_size_key="one_way_anova",
     ),
     "welch_anova": MethodMetadata(
@@ -57,8 +59,23 @@ METHOD_REGISTRY: dict[str, MethodMetadata] = {
         requires_repeated_measures=False,
         requires_complete_repeated=False,
         max_between_subject_factors=1,
-        default_posthoc="mannwhitney_pairwise",
+        default_posthoc="dunn",
         default_effect_size_key="kruskal",
+    ),
+    "two_way_anova": MethodMetadata(
+        id="two_way_anova",
+        label="Two-way ANOVA",
+        family="cross",
+        engine="pingouin",
+        compatible_data_types=("cross",),
+        analysis_class="omnibus",
+        requires_repeated_measures=False,
+        requires_complete_repeated=False,
+        max_between_subject_factors=2,
+        default_posthoc="group_pairwise_by_factor",
+        default_effect_size_key="two_way_anova",
+        requires_factor2=True,
+        min_between_subject_factors=2,
     ),
     "rm_anova": MethodMetadata(
         id="rm_anova",

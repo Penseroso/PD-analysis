@@ -87,6 +87,40 @@ def run_kruskal(df: pd.DataFrame, dv_col: str, group_col: str) -> dict:
     return {"omnibus_table": omnibus, "warnings": [], "metadata": {"effect_sizes": {"omnibus": effect_sizes}}}
 
 
+def run_two_way_anova(df: pd.DataFrame, dv_col: str, group_col: str, factor2_col: str) -> dict:
+    anova = pg.anova(data=df, dv=dv_col, between=[group_col, factor2_col], detailed=True)
+    residual_row = anova.loc[anova["Source"].astype(str).str.lower().isin({"residual", "within"})].iloc[0]
+    ss_total = float(anova["SS"].sum(skipna=True))
+    rows: list[dict] = []
+    for _, row in anova.iterrows():
+        source = str(row.get("Source"))
+        if source.lower() in {"residual", "within"}:
+            continue
+        rows.append(
+            {
+                "term": source,
+                "test": "two_way_anova",
+                "statistic": _safe_float(row.get("F")),
+                "pvalue": _safe_float(row.get("p_unc")),
+                "df1": _safe_float(row.get("DF")),
+                "df2": _safe_float(residual_row.get("DF")),
+                "ss": _safe_float(row.get("SS")),
+                "ms": _safe_float(row.get("MS")),
+                "effect_estimate": _omega_squared(
+                    ss_effect=row.get("SS"),
+                    df_effect=row.get("DF"),
+                    ms_error=residual_row.get("MS"),
+                    ss_total=ss_total,
+                ),
+                "effect_metric": "omega_squared",
+                "interpretation_basis": "two_way_anova",
+            }
+        )
+    omnibus = pd.DataFrame(rows)
+    effect_sizes = omnibus[["term", "effect_estimate", "effect_metric", "interpretation_basis"]].copy()
+    return {"omnibus_table": omnibus, "warnings": [], "metadata": {"effect_sizes": {"omnibus": effect_sizes}}}
+
+
 def _omega_squared(ss_effect: float | None, df_effect: float | None, ms_error: float | None, ss_total: float | None) -> float | None:
     if any(value is None or pd.isna(value) for value in (ss_effect, df_effect, ms_error, ss_total)):
         return None

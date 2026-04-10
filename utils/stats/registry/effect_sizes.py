@@ -7,6 +7,7 @@ EFFECT_SIZE_DEFAULTS = {
     "one_way_anova": "omega_squared",
     "welch_anova": "omega_squared",
     "kruskal": "epsilon_squared",
+    "two_way_anova": "omega_squared",
     "rm_anova": "partial_eta_squared",
     "mixed_anova": "partial_eta_squared",
     "friedman": "kendalls_w",

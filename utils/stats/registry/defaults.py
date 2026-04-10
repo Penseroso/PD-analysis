@@ -12,9 +12,10 @@ DEFAULT_OMNIBUS_METHODS = {
 }
 
 DEFAULT_POSTHOC_ASSOCIATIONS = {
-    "one_way_anova": "dunnett",
+    "one_way_anova": "tukey_hsd",
     "welch_anova": "games_howell",
-    "kruskal": "mannwhitney_pairwise",
+    "kruskal": "dunn",
+    "two_way_anova": "group_pairwise_by_factor",
     "rm_anova": "pairwise_ttests",
     "mixed_anova": "pairwise_tests",
     "friedman": "pairwise_wilcoxon",
@@ -23,8 +24,11 @@ DEFAULT_POSTHOC_ASSOCIATIONS = {
 
 MULTIPLICITY_DEFAULTS = {
     "dunnett": None,
+    "tukey_hsd": None,
     "games_howell": None,
     "mannwhitney_pairwise": "bonferroni",
+    "dunn": "holm",
+    "group_pairwise_by_factor": "bonferroni",
     "pairwise_ttests": "bonferroni",
     "pairwise_tests": "bonferroni",
     "pairwise_wilcoxon": "bonferroni",
@@ -36,8 +40,10 @@ def get_default_omnibus_method(data_type: str) -> str | None:
     return DEFAULT_OMNIBUS_METHODS.get(data_type)
 
 
-def get_default_posthoc_method(method_id: str) -> str | None:
+def get_default_posthoc_method(method_id: str, *, control_group: str | None = None) -> str | None:
     metadata = get_method_metadata(method_id)
+    if method_id == "one_way_anova" and control_group is not None:
+        return "dunnett"
     if metadata and metadata.default_posthoc is not None:
         return resolve_posthoc_id(metadata.default_posthoc)
     return resolve_posthoc_id(DEFAULT_POSTHOC_ASSOCIATIONS.get(method_id))

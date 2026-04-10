@@ -26,7 +26,10 @@ def build_analysis_plan(
     warnings: list[str] | None = None,
 ) -> AnalysisPlan:
     """Construct a normalized AnalysisPlan from explicit planning decisions."""
-    resolved_posthoc = resolve_posthoc_id(posthoc_method) if posthoc_method is not None else get_default_posthoc_method(omnibus_method)
+    resolved_posthoc = resolve_posthoc_id(posthoc_method) if posthoc_method is not None else get_default_posthoc_method(
+        omnibus_method,
+        control_group=control_group,
+    )
     posthoc_metadata = get_posthoc_metadata(resolved_posthoc)
     resolved_multiplicity = (
         multiplicity_method if multiplicity_method is not None else get_default_multiplicity_method(resolved_posthoc)

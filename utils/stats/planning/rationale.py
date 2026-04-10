@@ -24,7 +24,13 @@ def build_rationale(
     n_groups = len(longitudinal_n_per_group) if longitudinal_n_per_group else 0
 
     if data_type == "cross":
-        if selected_method == "kruskal":
+        if selected_method == "two_way_anova":
+            rationale.append("Two between-subject factors are present, so a native cross-sectional two-way ANOVA path is preferred.")
+            if any_non_normal:
+                rationale.append("Normality concerns remain because a robust nonparametric two-way omnibus is not available in the current engine set.")
+            elif unequal_variance:
+                rationale.append("Variance heterogeneity should be reviewed because a Welch-style two-way alternative is not implemented in the current engine set.")
+        elif selected_method == "kruskal":
             rationale.append("At least one group failed normality screening, so a rank-based omnibus test is preferred.")
         elif selected_method == "welch_anova":
             rationale.append("Levene's test suggests unequal variances, so Welch ANOVA is preferred.")
