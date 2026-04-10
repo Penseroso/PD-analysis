@@ -6,6 +6,7 @@ from utils.stats.registry.defaults import (
     get_default_posthoc_method,
     resolve_engine,
 )
+from utils.stats.registry.posthocs import get_posthoc_metadata
 
 
 def recommend_omnibus_method(
@@ -43,8 +44,10 @@ def recommend_omnibus_method(
 
 def build_policy_defaults(omnibus_method: str) -> dict:
     posthoc_method = get_default_posthoc_method(omnibus_method)
+    posthoc_metadata = get_posthoc_metadata(posthoc_method)
     return {
         "omnibus_method": omnibus_method,
+        "comparison_mode": posthoc_metadata.comparison_mode if posthoc_metadata else None,
         "posthoc_method": posthoc_method,
         "multiplicity_method": get_default_multiplicity_method(posthoc_method),
         "engine": resolve_engine(omnibus_method),

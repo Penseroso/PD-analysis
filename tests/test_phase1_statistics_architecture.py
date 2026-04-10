@@ -29,8 +29,9 @@ def test_typed_contracts_instantiate_correctly() -> None:
     plan = AnalysisPlan(
         data_type="longitudinal",
         design_family="longitudinal",
+        comparison_mode="all_pairs",
         omnibus_method="rm_anova",
-        posthoc_method="pairwise_ttests_bonferroni",
+        posthoc_method="pairwise_ttests",
         multiplicity_method="bonferroni",
         engine="pingouin",
         effect_size_policy="partial_eta_squared",

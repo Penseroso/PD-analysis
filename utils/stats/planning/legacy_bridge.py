@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from utils.stats.planning.plan_builder import apply_method_override
+from utils.stats.planning.plan_builder import apply_legacy_method_override
 from utils.stats.planning.selector import recommend_analysis_plan
 from utils.stats.validation.compatibility import validate_plan_compatibility
 
@@ -51,9 +51,11 @@ def legacy_select_method(
         "recommended_method": plan.omnibus_method,
         "recommended_engine": plan.engine,
         "recommended_plan": plan,
+        "resolved_plan": selection["resolved_plan"],
         "rationale": selection["rationale"],
         "can_override": selection["selector_metadata"]["can_override"],
         "fallback_reason": selection["fallback_reason"],
+        "selector_metadata": selection["selector_metadata"],
     }
 
 
@@ -67,7 +69,7 @@ def legacy_build_analysis_plan(
     if recommended_plan is None:
         raise ValueError("legacy_build_analysis_plan requires selector_result['recommended_plan'].")
     warnings = list(validation_result.get("warnings", []))
-    resolved_plan = apply_method_override(
+    resolved_plan = apply_legacy_method_override(
         recommended_plan,
         method_override=method_override,
         control_group=validation_result.get("control_group"),
@@ -79,7 +81,7 @@ def legacy_build_analysis_plan(
         warnings.append(
             f"Method override applied: running '{resolved_plan.omnibus_method}' instead of selector recommendation '{recommended_plan.omnibus_method}'."
         )
-        resolved_plan = apply_method_override(
+        resolved_plan = apply_legacy_method_override(
             recommended_plan,
             method_override=method_override,
             control_group=validation_result.get("control_group"),

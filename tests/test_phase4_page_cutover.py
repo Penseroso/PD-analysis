@@ -33,9 +33,10 @@ def test_plan_aware_compatibility_validation_passes_valid_cross_plan() -> None:
     plan = AnalysisPlan(
         data_type="cross",
         design_family="cross",
+        comparison_mode="control_based",
         omnibus_method="one_way_anova",
         posthoc_method="dunnett",
-        multiplicity_method="dunnett",
+        multiplicity_method=None,
         engine="pingouin",
         effect_size_policy="omega_squared",
         control_group="A",
@@ -50,8 +51,9 @@ def test_plan_aware_compatibility_blocks_incomplete_repeated_balanced_only_metho
     plan = AnalysisPlan(
         data_type="longitudinal",
         design_family="longitudinal",
+        comparison_mode="all_pairs",
         omnibus_method="mixed_anova",
-        posthoc_method="pairwise_tests_bonferroni",
+        posthoc_method="pairwise_tests",
         multiplicity_method="bonferroni",
         engine="pingouin",
         effect_size_policy="partial_eta_squared",
@@ -78,9 +80,10 @@ def test_page_bridge_returns_page_consumable_cross_payload(monkeypatch) -> None:
     plan = AnalysisPlan(
         data_type="cross",
         design_family="cross",
+        comparison_mode="control_based",
         omnibus_method="one_way_anova",
         posthoc_method="dunnett",
-        multiplicity_method="dunnett",
+        multiplicity_method=None,
         engine="pingouin",
         effect_size_policy="omega_squared",
         control_group="A",
@@ -124,6 +127,7 @@ def test_page_bridge_returns_page_consumable_mixedlm_payload(monkeypatch) -> Non
     plan = AnalysisPlan(
         data_type="longitudinal",
         design_family="longitudinal",
+        comparison_mode="reference_based",
         omnibus_method="mixedlm",
         posthoc_method="reference_contrasts",
         multiplicity_method=None,

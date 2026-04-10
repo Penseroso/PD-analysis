@@ -65,10 +65,15 @@ def run_games_howell(df: pd.DataFrame, dv_col: str, group_col: str) -> dict:
     return _payload(posthoc, [])
 
 
-def run_pairwise_mannwhitney(df: pd.DataFrame, dv_col: str, group_col: str) -> dict:
+def run_pairwise_mannwhitney(
+    df: pd.DataFrame,
+    dv_col: str,
+    group_col: str,
+    *,
+    multiplicity_method: str | None = "bonferroni",
+) -> dict:
     groups = [(str(group_name), group_df[dv_col].to_numpy(dtype=float)) for group_name, group_df in df.groupby(group_col, sort=False)]
     rows: list[dict] = []
-    n_tests = max(1, len(groups) * (len(groups) - 1) // 2)
     for (group_a, values_a), (group_b, values_b) in combinations(groups, 2):
         statistic, pvalue = stats.mannwhitneyu(values_a, values_b, alternative="two-sided")
         rows.append(
@@ -78,17 +83,19 @@ def run_pairwise_mannwhitney(df: pd.DataFrame, dv_col: str, group_col: str) -> d
                 "comparison": f"{group_a} vs {group_b}",
                 "test": "mannwhitneyu",
                 "statistic": _safe_float(statistic),
-                "pvalue": _safe_float(min(pvalue * n_tests, 1.0)),
+                "pvalue": _safe_float(pvalue),
                 "p_unc": _safe_float(pvalue),
-                "p_adjust": "bonferroni",
+                "p_adjust": multiplicity_method,
                 "ci_low": None,
                 "ci_high": None,
                 "effect_estimate": _rank_biserial_from_u(statistic, len(values_a), len(values_b)),
                 "effect_metric": "rank_biserial",
-                "interpretation_basis": "pairwise_nonparametric_bonferroni",
+                "interpretation_basis": "pairwise_nonparametric",
             }
         )
-    return _payload(pd.DataFrame(rows), [])
+    posthoc = pd.DataFrame(rows)
+    posthoc = _apply_pairwise_multiplicity(posthoc, multiplicity_method)
+    return _payload(posthoc, [])
 
 
 def _payload(table: pd.DataFrame, warnings: list[str]) -> dict:
@@ -112,6 +119,17 @@ def _payload(table: pd.DataFrame, warnings: list[str]) -> dict:
         )
     pairwise_effects = table[[column for column in ["group_a", "group_b", "effect_estimate", "effect_metric", "interpretation_basis"] if column in table.columns]].copy()
     return {"pairwise_table": table, "warnings": warnings, "metadata": {"effect_sizes": {"pairwise": pairwise_effects}}}
+
+
+def _apply_pairwise_multiplicity(table: pd.DataFrame, multiplicity_method: str | None) -> pd.DataFrame:
+    if table.empty or multiplicity_method in {None, "none"}:
+        return table
+    adjusted = table.copy()
+    if multiplicity_method == "bonferroni" and "p_unc" in adjusted.columns:
+        n_tests = max(1, len(adjusted))
+        adjusted["pvalue"] = adjusted["p_unc"].apply(lambda value: _safe_float(min(float(value) * n_tests, 1.0)))
+        adjusted["p_adjust"] = "bonferroni"
+    return adjusted
 
 
 def _hedges_g(values_a: np.ndarray, values_b: np.ndarray) -> float | None:

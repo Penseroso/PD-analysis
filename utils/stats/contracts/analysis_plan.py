@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 class AnalysisPlan:
     data_type: str
     design_family: str
+    comparison_mode: str | None
     omnibus_method: str
     posthoc_method: str | None
     multiplicity_method: str | None

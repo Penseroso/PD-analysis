@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from utils.stats.engines import cross_omnibus, cross_posthoc, longitudinal_omnibus, longitudinal_posthoc, mixedlm
+from utils.stats.registry.posthocs import resolve_posthoc_id
 
 
 def execute_plan(
@@ -44,9 +45,14 @@ def _execute_cross_plan(plan, *, df: pd.DataFrame, dv_col: str, group_col: str, 
     posthoc_runner = {
         "dunnett": lambda: cross_posthoc.run_dunnett(df, dv_col, group_col, control_group),
         "games_howell": lambda: cross_posthoc.run_games_howell(df, dv_col, group_col),
-        "mannwhitney_bonferroni": lambda: cross_posthoc.run_pairwise_mannwhitney(df, dv_col, group_col),
+        "mannwhitney_pairwise": lambda: cross_posthoc.run_pairwise_mannwhitney(
+            df,
+            dv_col,
+            group_col,
+            multiplicity_method=plan.multiplicity_method,
+        ),
         None: lambda: {"pairwise_table": None, "warnings": [], "metadata": {"effect_sizes": {"pairwise": None}}},
-    }[plan.posthoc_method]
+    }[resolve_posthoc_id(plan.posthoc_method)]
     return _merge_payloads(omnibus_runner(df, dv_col, group_col), posthoc_runner())
 
 
@@ -57,11 +63,30 @@ def _execute_longitudinal_plan(plan, *, df: pd.DataFrame, dv_col: str, group_col
         "mixed_anova": lambda: longitudinal_omnibus.run_mixed_anova(df, dv_col, subject_col, time_col, group_col),
     }[plan.omnibus_method]
     posthoc_runner = {
-        "pairwise_ttests_bonferroni": lambda: longitudinal_posthoc.run_pairwise_time_tests(df, dv_col, subject_col, time_col),
-        "wilcoxon_bonferroni": lambda: longitudinal_posthoc.run_pairwise_wilcoxon(df, dv_col, subject_col, time_col),
-        "pairwise_tests_bonferroni": lambda: longitudinal_posthoc.run_pairwise_group_at_time_tests(df, dv_col, subject_col, time_col, group_col),
+        "pairwise_ttests": lambda: longitudinal_posthoc.run_pairwise_time_tests(
+            df,
+            dv_col,
+            subject_col,
+            time_col,
+            multiplicity_method=plan.multiplicity_method,
+        ),
+        "pairwise_wilcoxon": lambda: longitudinal_posthoc.run_pairwise_wilcoxon(
+            df,
+            dv_col,
+            subject_col,
+            time_col,
+            multiplicity_method=plan.multiplicity_method,
+        ),
+        "pairwise_tests": lambda: longitudinal_posthoc.run_pairwise_group_at_time_tests(
+            df,
+            dv_col,
+            subject_col,
+            time_col,
+            group_col,
+            multiplicity_method=plan.multiplicity_method,
+        ),
         None: lambda: {"pairwise_table": None, "warnings": [], "metadata": {"effect_sizes": {"pairwise": None}}},
-    }[plan.posthoc_method]
+    }[resolve_posthoc_id(plan.posthoc_method)]
     return _merge_payloads(omnibus_runner(), posthoc_runner())
 
 

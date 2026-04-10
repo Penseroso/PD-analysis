@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from utils.stats.planning.plan_builder import apply_method_override, build_analysis_plan
+from utils.stats.planning.plan_builder import apply_legacy_method_override, build_analysis_plan
 from utils.stats.planning.policy_defaults import build_policy_defaults, recommend_omnibus_method
 from utils.stats.planning.rationale import build_rationale
 from utils.stats.validation.compatibility import validate_plan_compatibility
@@ -48,6 +48,7 @@ def recommend_analysis_plan(
     recommended_plan = build_analysis_plan(
         data_type=data_type,
         design_family=data_type,
+        comparison_mode=defaults["comparison_mode"],
         omnibus_method=defaults["omnibus_method"],
         posthoc_method=defaults["posthoc_method"],
         multiplicity_method=defaults["multiplicity_method"],
@@ -57,7 +58,7 @@ def recommend_analysis_plan(
         warnings=warnings,
     )
 
-    resolved_plan = apply_method_override(
+    resolved_plan = apply_legacy_method_override(
         recommended_plan,
         method_override=method_override,
         control_group=control_group,
@@ -69,7 +70,7 @@ def recommend_analysis_plan(
         warnings.append(
             f"Method override applied: running '{resolved_plan.omnibus_method}' instead of selector recommendation '{recommended_method}'."
         )
-        resolved_plan = apply_method_override(
+        resolved_plan = apply_legacy_method_override(
             recommended_plan,
             method_override=method_override,
             control_group=control_group,
@@ -94,6 +95,10 @@ def recommend_analysis_plan(
         "selector_metadata": {
             "recommended_method": recommended_method,
             "recommended_engine": recommended_plan.engine,
+            "effective_omnibus_method": resolved_plan.omnibus_method,
+            "effective_posthoc_method": resolved_plan.posthoc_method,
+            "effective_multiplicity_method": resolved_plan.multiplicity_method,
+            "effective_comparison_mode": resolved_plan.comparison_mode,
             "can_override": True,
         },
     }

@@ -118,10 +118,13 @@ def run_page_analysis_for_dv(
         "recommended_method": selection["recommended_plan"].omnibus_method,
         "recommended_engine": selection["recommended_plan"].engine,
         "recommended_plan": selection["recommended_plan"],
+        "resolved_plan": selection["resolved_plan"],
         "rationale": selection["rationale"],
         "can_override": selection["selector_metadata"]["can_override"],
         "fallback_reason": selection["fallback_reason"],
-        "resolved_plan": selection["resolved_plan"],
+        "warnings": selection["warnings"],
+        "blocking_reasons": selection["blocking_reasons"],
+        "selector_metadata": selection["selector_metadata"],
     }
     return page_payload
 
@@ -178,10 +181,13 @@ def _build_blocked_page_payload(
             "recommended_method": selection["recommended_plan"].omnibus_method,
             "recommended_engine": selection["recommended_plan"].engine,
             "recommended_plan": selection["recommended_plan"],
+            "resolved_plan": selection["resolved_plan"],
             "rationale": selection["rationale"],
             "can_override": selection["selector_metadata"]["can_override"],
             "fallback_reason": selection["fallback_reason"],
-            "resolved_plan": selection["resolved_plan"],
+            "warnings": selection["warnings"],
+            "blocking_reasons": selection["blocking_reasons"],
+            "selector_metadata": selection["selector_metadata"],
         },
         "time_order": time_order,
     }

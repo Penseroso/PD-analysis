@@ -15,6 +15,7 @@ def run_pairwise_time_tests(
     time_col: str,
     *,
     interpretation_basis: str = "pairwise_parametric",
+    multiplicity_method: str | None = "bonferroni",
 ) -> dict:
     pairwise = pg.pairwise_tests(
         data=df,
@@ -22,19 +23,25 @@ def run_pairwise_time_tests(
         within=time_col,
         subject=subject_col,
         parametric=True,
-        padjust="bonf",
+        padjust=_resolve_pingouin_padjust(multiplicity_method),
         effsize="hedges",
     )
     posthoc = _format_pairwise_time_tests(pairwise, interpretation_basis=interpretation_basis)
+    posthoc["p_adjust"] = multiplicity_method
     return _payload(posthoc, [])
 
 
-def run_pairwise_wilcoxon(df: pd.DataFrame, dv_col: str, subject_col: str, time_col: str) -> dict:
+def run_pairwise_wilcoxon(
+    df: pd.DataFrame,
+    dv_col: str,
+    subject_col: str,
+    time_col: str,
+    *,
+    multiplicity_method: str | None = "bonferroni",
+) -> dict:
     wide = df.pivot_table(index=subject_col, columns=time_col, values=dv_col, aggfunc="mean")
     wide = wide.dropna(axis=0, how="any")
-    n_time = wide.shape[1]
     rows: list[dict] = []
-    n_tests = max(1, n_time * (n_time - 1) // 2)
     for time_a, time_b in combinations(wide.columns.tolist(), 2):
         paired = wide[[time_a, time_b]].dropna()
         if paired.empty:
@@ -49,15 +56,16 @@ def run_pairwise_wilcoxon(df: pd.DataFrame, dv_col: str, subject_col: str, time_
                 "comparison": f"{time_a} vs {time_b}",
                 "test": "wilcoxon",
                 "statistic": _safe_float(wilcoxon.statistic),
-                "pvalue": min(float(wilcoxon.pvalue) * n_tests, 1.0),
+                "pvalue": _safe_float(wilcoxon.pvalue),
                 "p_unc": _safe_float(wilcoxon.pvalue),
-                "p_adjust": "bonferroni",
+                "p_adjust": multiplicity_method,
                 "effect_estimate": _paired_rank_biserial(diff.to_numpy(dtype=float)),
                 "effect_metric": "rank_biserial",
                 "interpretation_basis": "pairwise_nonparametric",
             }
         )
-    return _payload(pd.DataFrame(rows), [])
+    posthoc = _apply_pairwise_multiplicity(pd.DataFrame(rows), multiplicity_method)
+    return _payload(posthoc, [])
 
 
 def run_pairwise_group_at_time_tests(
@@ -66,6 +74,8 @@ def run_pairwise_group_at_time_tests(
     subject_col: str,
     time_col: str,
     group_col: str,
+    *,
+    multiplicity_method: str | None = "bonferroni",
 ) -> dict:
     pairwise = pg.pairwise_tests(
         data=df,
@@ -74,11 +84,12 @@ def run_pairwise_group_at_time_tests(
         between=group_col,
         subject=subject_col,
         parametric=True,
-        padjust="bonf",
+        padjust=_resolve_pingouin_padjust(multiplicity_method),
         effsize="hedges",
         interaction=True,
     )
     posthoc = _format_pairwise_mixed_tests(pairwise, time_col, group_col)
+    posthoc["p_adjust"] = multiplicity_method
     return _payload(posthoc, [])
 
 
@@ -107,6 +118,25 @@ def _payload(table: pd.DataFrame, warnings: list[str]) -> dict:
         )
     pairwise_effects = table[[column for column in ["comparison", "time_a", "time_b", "effect_estimate", "effect_metric", "interpretation_basis"] if column in table.columns]].copy()
     return {"pairwise_table": table, "warnings": warnings, "metadata": {"effect_sizes": {"pairwise": pairwise_effects}}}
+
+
+def _apply_pairwise_multiplicity(table: pd.DataFrame, multiplicity_method: str | None) -> pd.DataFrame:
+    if table.empty or multiplicity_method in {None, "none"}:
+        return table
+    adjusted = table.copy()
+    if multiplicity_method == "bonferroni" and "p_unc" in adjusted.columns:
+        n_tests = max(1, len(adjusted))
+        adjusted["pvalue"] = adjusted["p_unc"].apply(lambda value: _safe_float(min(float(value) * n_tests, 1.0)))
+        adjusted["p_adjust"] = "bonferroni"
+    return adjusted
+
+
+def _resolve_pingouin_padjust(multiplicity_method: str | None) -> str:
+    if multiplicity_method in {None, "none"}:
+        return "none"
+    if multiplicity_method == "bonferroni":
+        return "bonf"
+    return "none"
 
 
 def _format_pairwise_time_tests(pairwise: pd.DataFrame, interpretation_basis: str) -> pd.DataFrame:

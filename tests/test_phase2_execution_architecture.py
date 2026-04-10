@@ -70,14 +70,14 @@ def test_cross_dispatch_routes_correct_posthoc_runner_for_each_path(monkeypatch)
     monkeypatch.setattr("utils.stats.engines.cross_omnibus.run_kruskal", lambda *a, **k: {"omnibus_table": pd.DataFrame(), "warnings": [], "metadata": {"effect_sizes": {"omnibus": pd.DataFrame()}}})
     monkeypatch.setattr("utils.stats.engines.cross_posthoc.run_dunnett", lambda *a, **k: calls.append("dunnett") or {"pairwise_table": pd.DataFrame(), "warnings": [], "metadata": {"effect_sizes": {"pairwise": pd.DataFrame()}}})
     monkeypatch.setattr("utils.stats.engines.cross_posthoc.run_games_howell", lambda *a, **k: calls.append("games_howell") or {"pairwise_table": pd.DataFrame(), "warnings": [], "metadata": {"effect_sizes": {"pairwise": pd.DataFrame()}}})
-    monkeypatch.setattr("utils.stats.engines.cross_posthoc.run_pairwise_mannwhitney", lambda *a, **k: calls.append("mannwhitney_bonferroni") or {"pairwise_table": pd.DataFrame(), "warnings": [], "metadata": {"effect_sizes": {"pairwise": pd.DataFrame()}}})
+    monkeypatch.setattr("utils.stats.engines.cross_posthoc.run_pairwise_mannwhitney", lambda *a, **k: calls.append("mannwhitney_pairwise") or {"pairwise_table": pd.DataFrame(), "warnings": [], "metadata": {"effect_sizes": {"pairwise": pd.DataFrame()}}})
 
     df = pd.DataFrame({"group": ["A", "B"], "value": [1.0, 2.0]})
     for method in ("one_way_anova", "welch_anova", "kruskal"):
         plan = build_analysis_plan_contract(data_type="cross", omnibus_method=method)
         execute_plan(plan, df=df, dv_col="value", group_col="group")
 
-    assert calls == ["dunnett", "games_howell", "mannwhitney_bonferroni"]
+    assert calls == ["dunnett", "games_howell", "mannwhitney_pairwise"]
 
 
 def test_longitudinal_dispatch_routes_correct_omnibus_and_pairwise_runners(monkeypatch) -> None:
