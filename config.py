@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from utils.stats.registry.effect_sizes import EFFECT_SIZE_DEFAULTS
+
 APP_NAME = "PD Data Analysis"
 
 SUPPORTED_FORMATS = {
@@ -9,6 +11,9 @@ SUPPORTED_FORMATS = {
     "replicate": "Replicate columns",
 }
 
+# UI compatibility surface only.
+# Internal method metadata and engine/default resolution now live under
+# utils.stats.registry and should be treated as the source of truth.
 ANALYSIS_METHODS = {
     "cross": [
         "auto",
@@ -34,13 +39,3 @@ DEFAULT_FIGURE_CONFIG = {
 
 FORMAT_CONFIDENCE_THRESHOLD = 0.7
 NUMERIC_SUCCESS_THRESHOLD = 0.8
-
-EFFECT_SIZE_DEFAULTS = {
-    "one_way_anova": "omega_squared",
-    "welch_anova": "omega_squared",
-    "rm_anova": "partial_eta_squared",
-    "mixed_anova": "partial_eta_squared",
-    "pairwise_parametric": "hedges_g",
-    "pairwise_nonparametric": "rank_biserial",
-    "mixedlm": "beta_se_ci",
-}

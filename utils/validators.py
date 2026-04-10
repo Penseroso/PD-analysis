@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
+from utils.stats.diagnostics.design_inspector import inspect_repeated_structure, summarize_balance as summarize_design_balance
+from utils.stats.validation.dataset_validator import validate_dataset
+
 
 KEEP_LONG_BLOCKING_MESSAGE = (
     "Technical replicates are preserved in long form. They are not valid independent inferential units in the current app."
@@ -23,62 +26,7 @@ def detect_repeated_structure(
     subject_col: str = "subject",
     time_col: str = "time",
 ) -> dict:
-    if df is None or df.empty:
-        return {
-            "detected": False,
-            "has_subject_column": False,
-            "has_time_column": False,
-            "n_time_levels": 0,
-            "n_subjects_with_multiple_timepoints": 0,
-            "recommended_data_type": "cross",
-            "reason": "No normalized data is available.",
-        }
-
-    has_subject_column = subject_col in df.columns and df[subject_col].notna().any()
-    has_time_column = time_col in df.columns and df[time_col].notna().any()
-    if not has_subject_column or not has_time_column:
-        return {
-            "detected": False,
-            "has_subject_column": has_subject_column,
-            "has_time_column": has_time_column,
-            "n_time_levels": 0,
-            "n_subjects_with_multiple_timepoints": 0,
-            "recommended_data_type": "cross",
-            "reason": "Repeated-measures structure requires both subject and time columns.",
-        }
-
-    working_df = df[[subject_col, time_col]].dropna().copy()
-    if working_df.empty:
-        return {
-            "detected": False,
-            "has_subject_column": has_subject_column,
-            "has_time_column": has_time_column,
-            "n_time_levels": 0,
-            "n_subjects_with_multiple_timepoints": 0,
-            "recommended_data_type": "cross",
-            "reason": "Subject/time columns are present but contain no analyzable repeated rows.",
-        }
-
-    working_df[subject_col] = working_df[subject_col].astype(str)
-    working_df[time_col] = working_df[time_col].astype(str)
-    n_time_levels = int(working_df[time_col].nunique(dropna=True))
-    time_levels_per_subject = working_df.groupby(subject_col, sort=False)[time_col].nunique(dropna=True)
-    n_subjects_with_multiple_timepoints = int((time_levels_per_subject >= 2).sum())
-    detected = n_time_levels >= 2 and n_subjects_with_multiple_timepoints >= 1
-    reason = (
-        "Subject and time columns with repeated observations across at least two time levels were detected."
-        if detected
-        else "Subject/time columns are present, but repeated observations across multiple time levels were not clearly detected."
-    )
-    return {
-        "detected": detected,
-        "has_subject_column": has_subject_column,
-        "has_time_column": has_time_column,
-        "n_time_levels": n_time_levels,
-        "n_subjects_with_multiple_timepoints": n_subjects_with_multiple_timepoints,
-        "recommended_data_type": "longitudinal" if detected else "cross",
-        "reason": reason,
-    }
+    return inspect_repeated_structure(df=df, subject_col=subject_col, time_col=time_col).to_dict()
 
 
 
@@ -95,18 +43,20 @@ def validate_normalized_df(
     replicate_preserved: bool = False,
     normalization_metadata: dict | None = None,
 ) -> dict:
-    warnings: list[str] = []
-    blocking_reasons: list[str] = []
-    suggested_actions: list[str] = []
+    validation_payload = validate_dataset(
+        df=df,
+        data_type=data_type,
+        selected_dv_cols=selected_dv_cols,
+        between_factors=between_factors,
+        subject_col=subject_col,
+        group_col=group_col,
+        time_col=time_col,
+        factor2_col=factor2_col,
+    )
+    warnings = list(validation_payload.get("warnings", []))
+    blocking_reasons = list(validation_payload.get("blocking_reasons", []))
+    suggested_actions = list(validation_payload.get("suggested_actions", []))
     normalization_metadata = normalization_metadata or {}
-
-    if df is None or df.empty:
-        blocking_reasons.append("No normalized data is available.")
-        suggested_actions.append("Return to Upload And Mapping and normalize the input data.")
-
-    if not selected_dv_cols:
-        blocking_reasons.append("No biomarker columns were selected.")
-        suggested_actions.append("Select at least one value column in Analysis.")
 
     repeated_structure_info = detect_repeated_structure(df=df, subject_col=subject_col, time_col=time_col)
     if repeated_structure_info["detected"]:
@@ -114,26 +64,6 @@ def validate_normalized_df(
         if data_type == "cross":
             blocking_reasons.append(REPEATED_STRUCTURE_BLOCKING_REASON)
             suggested_actions.append(REPEATED_STRUCTURE_SUGGESTED_ACTION)
-
-    if group_col not in df.columns:
-        blocking_reasons.append("The normalized dataset does not contain a group column.")
-    elif df[group_col].nunique(dropna=True) < 2 and data_type == "cross":
-        blocking_reasons.append("At least two groups are required for cross-sectional comparison.")
-        suggested_actions.append("Verify the group mapping or choose a different analysis type.")
-
-    if data_type == "longitudinal":
-        if subject_col not in df.columns or df[subject_col].isna().all():
-            blocking_reasons.append("Repeated-measures analysis requires a subject column.")
-            suggested_actions.append("Map the subject ID column and normalize again.")
-        if time_col not in df.columns or df[time_col].isna().all():
-            blocking_reasons.append("Longitudinal analysis requires a time column.")
-            suggested_actions.append("Map the time column and normalize again.")
-        elif df[time_col].nunique(dropna=True) < 2:
-            blocking_reasons.append("Longitudinal analysis requires at least two time levels.")
-            suggested_actions.append("Confirm that the time variable was mapped correctly.")
-
-    if factor2_col and factor2_col not in df.columns:
-        warnings.append("The selected factor2 column is not present in the normalized dataset.")
 
     if control_group is None and data_type == "cross":
         warnings.append("Control-based post-hoc comparisons are unavailable until a control group is selected.")
@@ -203,79 +133,18 @@ def summarize_balance(
     time_col: str | None,
     group_col: str | None = "group",
 ) -> dict:
-    if df is None or df.empty or time_col is None or time_col not in df.columns or subject_col not in df.columns:
-        return {
-            "is_balanced": True,
-            "has_missing_repeated_cells": False,
-            "subject_observation_counts": {},
-            "n_subjects_per_group": {},
-            "n_complete_subjects_per_group": {},
-            "missingness_info": {},
-            "expected_time_levels": 0,
-            "incomplete_subjects_by_group": {},
-        }
-
-    working_df = df[[subject_col, time_col] + ([group_col] if group_col and group_col in df.columns else [])].copy()
-    working_df[subject_col] = working_df[subject_col].astype(str)
-    working_df[time_col] = working_df[time_col].astype(str)
-    if group_col and group_col in working_df.columns:
-        working_df[group_col] = working_df[group_col].astype(str)
-
-    counts = working_df.groupby(subject_col)[time_col].nunique(dropna=True).to_dict()
-    expected_levels = int(working_df[time_col].nunique(dropna=True))
-    is_balanced = len(set(counts.values())) <= 1 and all(count == expected_levels for count in counts.values())
-    has_missing = any(count < expected_levels for count in counts.values())
-
-    n_subjects_per_group: dict[str, int] = {}
-    n_complete_subjects_per_group: dict[str, int] = {}
-    incomplete_subjects_by_group: dict[str, list[str]] = {}
-    if group_col and group_col in working_df.columns:
-        n_subjects_per_group = (
-            working_df[[group_col, subject_col]]
-            .drop_duplicates()
-            .groupby(group_col, sort=False)[subject_col]
-            .nunique(dropna=True)
-            .astype(int)
-            .to_dict()
-        )
-        subject_time_counts = (
-            working_df.groupby([group_col, subject_col], sort=False)[time_col]
-            .nunique(dropna=True)
-            .reset_index(name="n_time_levels")
-        )
-        n_complete_subjects_per_group = (
-            subject_time_counts.loc[subject_time_counts["n_time_levels"] >= expected_levels]
-            .groupby(group_col, sort=False)[subject_col]
-            .nunique(dropna=True)
-            .astype(int)
-            .to_dict()
-        )
-        for group_name in n_subjects_per_group:
-            n_complete_subjects_per_group.setdefault(group_name, 0)
-        incomplete_subjects_by_group = (
-            subject_time_counts.loc[subject_time_counts["n_time_levels"] < expected_levels]
-            .groupby(group_col, sort=False)[subject_col]
-            .apply(lambda series: [str(item) for item in series.tolist()])
-            .to_dict()
-        )
-
-    return {
-        "is_balanced": is_balanced,
-        "has_missing_repeated_cells": has_missing,
-        "subject_observation_counts": counts,
-        "n_subjects_per_group": n_subjects_per_group,
-        "n_complete_subjects_per_group": n_complete_subjects_per_group,
-        "expected_time_levels": expected_levels,
-        "incomplete_subjects_by_group": incomplete_subjects_by_group,
-        "missingness_info": {
-            "expected_time_levels": expected_levels,
-            "subjects_with_missing": [subject for subject, count in counts.items() if count < expected_levels],
-        },
-    }
+    return summarize_design_balance(
+        df=df,
+        subject_col=subject_col,
+        time_col=time_col,
+        group_col=group_col,
+    ).to_dict()
 
 
 
 def _count_observations_per_group(df: pd.DataFrame, group_col: str, selected_dv_cols: list[str]) -> dict:
+    if df is None or df.empty:
+        return {}
     if group_col not in df.columns:
         return {}
     count_col = next((column for column in selected_dv_cols if column in df.columns), None)
