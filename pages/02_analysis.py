@@ -5,10 +5,7 @@ import streamlit as st
 from config import ANALYSIS_METHODS, DEFAULT_FIGURE_CONFIG
 from utils.state import init_session_state, reset_analysis_state
 from utils.ui import render_top_nav
-from utils.stats_cross import compute_cross_assumptions, run_cross_sectional
-from utils.stats_longitudinal import compute_longitudinal_assumptions, run_longitudinal
-from utils.stats_mixedlm import run_mixedlm
-from utils.stats_selector import build_analysis_plan, select_method
+from utils.stats.planning.page_bridge import preview_plan, run_page_analysis_for_dv
 from utils.validators import detect_repeated_structure, validate_normalized_df
 from utils.viz_cross import make_figure as make_cross_figure
 from utils.viz_longitudinal import make_figure as make_longitudinal_figure
@@ -199,27 +196,30 @@ with st.container(border=True):
         normalization_metadata=normalization_metadata,
     )
     preview_effective_method = st.session_state.method_override
-    if data_type == "longitudinal" and selected_dv_cols:
+    if selected_dv_cols:
         preview_dv = selected_dv_cols[0]
-        preview_assumptions = compute_longitudinal_assumptions(
+        preview_selection = preview_plan(
             df=df,
             dv_col=preview_dv,
-            group_col="group",
-            subject_col="subject",
-            time_col="time",
+            validation_result=preview_validation,
+            data_type=data_type,
             between_factors=between_factors,
+            method_override=st.session_state.method_override,
+            control_group=None,
+            reference_group=None,
+            factor2_col=factor2_col,
             time_order=time_order,
         )
-        preview_selector = select_method(
-            data_type=data_type,
-            normality=preview_assumptions.get("normality", {}),
-            sphericity=preview_assumptions.get("sphericity"),
-            levene={},
-            balance_info=preview_validation["balance_info"],
-            between_factors=between_factors,
-            n_per_group=preview_validation["n_per_group"],
-        )
-        preview_effective_method = st.session_state.method_override or preview_selector["recommended_method"]
+        preview_selector = {
+            "recommended_method": preview_selection["selection"]["recommended_plan"].omnibus_method,
+            "recommended_engine": preview_selection["selection"]["recommended_plan"].engine,
+            "recommended_plan": preview_selection["selection"]["recommended_plan"],
+            "rationale": preview_selection["selection"]["rationale"],
+            "can_override": preview_selection["selection"]["selector_metadata"]["can_override"],
+            "fallback_reason": preview_selection["selection"]["fallback_reason"],
+            "resolved_plan": preview_selection["selection"]["resolved_plan"],
+        }
+        preview_effective_method = preview_selection["selection"]["resolved_plan"].omnibus_method
     else:
         preview_selector = None
 
@@ -322,120 +322,29 @@ with st.container(border=True):
 
         for dv_col in selected_dv_cols:
             dv_label = _label_for_dv(dv_col)
-            if data_type == "cross":
-                assumptions = compute_cross_assumptions(df=df, dv_col=dv_col, group_col="group")
-                selector_result = select_method(
-                    data_type=data_type,
-                    normality=assumptions.get("normality", {}),
-                    sphericity=None,
-                    levene=assumptions.get("levene", {}),
-                    balance_info=validation_result["balance_info"],
-                    between_factors=between_factors,
-                    n_per_group=validation_result["n_per_group"],
-                )
-                plan = build_analysis_plan(validation_result, selector_result, st.session_state.method_override)
-                if plan["analysis_status"] == "blocked":
-                    result = {
-                        "analysis_status": "blocked",
-                        "used_method": plan["final_method"],
-                        "warnings": plan.get("warnings", []),
-                        "blocking_reasons": plan.get("blocking_reasons", []),
-                        "suggested_actions": plan.get("suggested_actions", validation_result.get("suggested_actions", [])),
-                        "star_map": [],
-                        "omnibus": None,
-                        "posthoc_table": None,
-                        "dv_col": dv_col,
-                        "dv_label": dv_label,
-                        "selector": selector_result,
-                    }
-                else:
-                    result = run_cross_sectional(
-                        df=df,
-                        dv_col=dv_col,
-                        group_col="group",
-                        control_group=control_group,
-                        method=plan["final_method"],
-                    )
-                    result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
-                    result["selector"] = selector_result
-                    result["dv_label"] = dv_label
-                analysis_results[dv_col] = result
-                if result.get("analysis_status") == "ready":
+            result = run_page_analysis_for_dv(
+                df=df,
+                dv_col=dv_col,
+                dv_label=dv_label,
+                validation_result=validation_result,
+                data_type=data_type,
+                between_factors=between_factors,
+                method_override=st.session_state.method_override,
+                control_group=control_group,
+                reference_group=reference_group,
+                factor2_col=factor2_col,
+                time_order=time_order,
+            )
+            analysis_results[dv_col] = result
+            if result.get("analysis_status") == "ready":
+                if data_type == "cross":
                     figure_objects[dv_col] = make_cross_figure(df=df, result=result, config=DEFAULT_FIGURE_CONFIG)
                 else:
-                    aggregated_blocking.extend(result.get("blocking_reasons", []))
-            else:
-                assumptions = compute_longitudinal_assumptions(
-                    df=df,
-                    dv_col=dv_col,
-                    group_col="group",
-                    subject_col="subject",
-                    time_col="time",
-                    between_factors=between_factors,
-                    time_order=time_order,
-                )
-                selector_result = select_method(
-                    data_type=data_type,
-                    normality=assumptions.get("normality", {}),
-                    sphericity=assumptions.get("sphericity"),
-                    levene={},
-                    balance_info=validation_result["balance_info"],
-                    between_factors=between_factors,
-                    n_per_group=validation_result["n_per_group"],
-                )
-                plan = build_analysis_plan(validation_result, selector_result, st.session_state.method_override)
-                if plan["analysis_status"] == "blocked":
-                    result = {
-                        "analysis_status": "blocked",
-                        "used_method": plan["final_method"],
-                        "warnings": plan.get("warnings", []),
-                        "blocking_reasons": plan.get("blocking_reasons", []),
-                        "suggested_actions": plan.get("suggested_actions", validation_result.get("suggested_actions", [])),
-                        "star_map": [],
-                        "omnibus": None,
-                        "posthoc_table": None,
-                        "dv_col": dv_col,
-                        "dv_label": dv_label,
-                        "selector": selector_result,
-                        "time_order": time_order,
-                    }
-                elif plan["engine"] == "statsmodels":
-                    result = run_mixedlm(
-                        df=df,
-                        dv_col=dv_col,
-                        subject_col="subject",
-                        time_col="time",
-                        group_col="group",
-                        factor2_col=factor2_col,
-                        formula_mode="default",
-                        reference_group=reference_group,
-                        time_order=time_order,
-                    )
-                    result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
-                    result["dv_label"] = dv_label
-                else:
-                    result = run_longitudinal(
-                        df=df,
-                        dv_col=dv_col,
-                        group_col="group",
-                        subject_col="subject",
-                        time_col="time",
-                        between_factors=between_factors,
-                        factor2_col=factor2_col,
-                        method=plan["final_method"],
-                        time_order=time_order,
-                    )
-                    result["warnings"] = sorted(set(result.get("warnings", []) + plan.get("warnings", [])))
-                    result["dv_label"] = dv_label
-                result["selector"] = selector_result
-                result["time_order"] = time_order
-                analysis_results[dv_col] = result
-                if result.get("analysis_status") == "ready":
                     figure_objects[dv_col] = make_longitudinal_figure(
                         df=df, result=result, config=DEFAULT_FIGURE_CONFIG, time_order=time_order
                     )
-                else:
-                    aggregated_blocking.extend(result.get("blocking_reasons", []))
+            else:
+                aggregated_blocking.extend(result.get("blocking_reasons", []))
 
         st.session_state.analysis_results = analysis_results
         st.session_state.figure_objects = figure_objects

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from utils.stats.planning.plan_builder import apply_method_override
 from utils.stats.planning.selector import recommend_analysis_plan
-from utils.stats.validation.compatibility import validate_resolved_plan_compatibility
+from utils.stats.validation.compatibility import validate_plan_compatibility
 
 
 KEEP_LONG_BLOCKING_REASON = (
@@ -101,9 +101,9 @@ def legacy_build_analysis_plan(
             "plan": recommended_plan,
         }
 
-    blocking_reasons = validate_resolved_plan_compatibility(
+    blocking_reasons = validate_plan_compatibility(
+        plan=resolved_plan,
         validation_result=validation_result,
-        final_method=resolved_plan.omnibus_method,
     )
     suggested_actions = list(validation_result.get("suggested_actions", []))
     if validation_result.get("repeated_structure_info", {}).get("detected") and validation_result.get("data_type") == "cross":

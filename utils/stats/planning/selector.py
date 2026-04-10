@@ -3,7 +3,7 @@ from __future__ import annotations
 from utils.stats.planning.plan_builder import apply_method_override, build_analysis_plan
 from utils.stats.planning.policy_defaults import build_policy_defaults, recommend_omnibus_method
 from utils.stats.planning.rationale import build_rationale
-from utils.stats.validation.compatibility import validate_resolved_plan_compatibility
+from utils.stats.validation.compatibility import validate_plan_compatibility
 
 
 def recommend_analysis_plan(
@@ -78,9 +78,10 @@ def recommend_analysis_plan(
             warnings=warnings,
         )
 
-    blocking_reasons = validate_resolved_plan_compatibility(
+    blocking_reasons = validate_plan_compatibility(
+        plan=resolved_plan,
         validation_result=validation_result,
-        final_method=resolved_plan.omnibus_method,
+        diagnostics_context=diagnostics_context,
     )
     return {
         "recommended_plan": recommended_plan,
